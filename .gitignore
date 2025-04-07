@@ -4,9 +4,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
-myenv/
-.venv/
 build/
 develop-eggs/
 dist/
@@ -22,19 +19,50 @@ var/
 .installed.cfg
 *.egg
 
-# Virtual Environment
+# Virtual Environment - alla typer
+.venv/
 venv/
+env/
+myenv/
 ENV/
-.env
-.env.bak
 
-# Model files and data
+# Environment variabler och tokens
+.env
+.env.*
+.env.bak
+*token*
+hf_token*
+fix_token*
+set_token*
+verify_token*
+
+# VS Code och andra IDE
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+*.code-workspace
+transcibe test.code-workspace
+.codebuddy/
+
+# Model files och stora binärfiler - extra noggrann
 models/
 *.bin
 *.pt
 *.pth
 *.onnx
 *.model
+*.dll
+*.lib
+*.ckpt
+
+# Ljud- och mediafiler
+*.wav
+*.mp3
+*.mp4
+*.ogg
+*.flac
+test_voicemeeter.wav
 
 # Logs och temporära filer
 logs/
@@ -42,6 +70,7 @@ logs/
 *.swp
 *.tmp
 *.temp
+*.bak
 
 # OS-specifika filer
 .DS_Store
@@ -51,21 +80,9 @@ logs/
 .Trashes
 ehthumbs.db
 Thumbs.db
+~$*
 
-# IDE-filer
-.idea/
-.vscode/
-*.sublime-workspace
-*.sublime-project
-*.code-workspace
-
-# Stora filer och personliga tokens
-*.wav
-*.mp3
-*.mp4
-*token*
-
-# Känsliga filer
+# Känsliga filer och användardata
 client_secret*.json
 conversation_logs/
 
