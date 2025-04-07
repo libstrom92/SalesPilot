@@ -1,0 +1,4 @@
+python-venv
+Hugging-Face-token-manager
+test-audio-setup
+transcribe-live

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rösttranskribering - Huvudmeny</title>
+    <style>
+        :root {
+            --primary-color: #4285f4;
+            --background-light: #f5f5f5;
+            --text-light: #333;
+            --card-light: white;
+            --border-color: #ccc;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            margin: 0;
+            padding: 40px;
+            background: var(--background-light);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .menu-container {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            max-width: 800px;
+            width: 100%;
+        }
+
+        .menu-item {
+            background: var(--card-light);
+            padding: 30px;
+            border-radius: 12px;
+            text-decoration: none;
+            color: var(--text-light);
+            border: 1px solid var(--border-color);
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+
+        .menu-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .menu-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .menu-title {
+            font-size: 20px;
+            font-weight: 500;
+            margin-bottom: 10px;
+        }
+
+        .menu-description {
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="menu-container">
+        <a href="transcribe.html" class="menu-item">
+            <span class="menu-icon">🎙️</span>
+            <span class="menu-title">Transkribering</span>
+            <span class="menu-description">Starta ny transkribering med realtidsanalys</span>
+        </a>
+        
+        <a href="settings.html" class="menu-item">
+            <span class="menu-icon">⚙️</span>
+            <span class="menu-title">Inställningar</span>
+            <span class="menu-description">Konfigurera ljud, språk och modeller</span>
+        </a>
+        
+        <a href="conversations.html" class="menu-item">
+            <span class="menu-icon">💬</span>
+            <span class="menu-title">Samtal</span>
+            <span class="menu-description">Hantera inspelade samtal och analyser</span>
+        </a>
+        
+        <a href="frameworks.html" class="menu-item">
+            <span class="menu-icon">📋</span>
+            <span class="menu-title">Ramverk</span>
+            <span class="menu-description">Skapa och hantera inställningsmallar</span>
+        </a>
+    </div>
+</body>
+</html>

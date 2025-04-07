@@ -1,0 +1,15 @@
+AUDIO_DEVICE_ID=2
+
+# Audio Processing Settings
+SAMPLE_RATE=16000
+
+# Whisper Model Settings
+WHISPER_MODEL=small
+COMPUTE_TYPE=int8
+
+# Transcription Settings
+TRANSCRIPTION_MODE=fast  # Options: fast, balanced, quality
+
+# WebSocket Settings
+WEBSOCKET_PORT=9091
+AUDIO_CHANNELS=1

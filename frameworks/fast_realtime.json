@@ -1,0 +1,25 @@
+{
+  "id": "fast_realtime",
+  "name": "Snabb realtid",
+  "description": "Optimerad för snabb realtidsbearbetning med minimal fördröjning, perfekt för direktsändning eller live-evenemang",
+  "settings": {
+    "audio": {
+      "noise_threshold": 25,
+      "sample_rate": 16000,
+      "channels": 1
+    },
+    "language": {
+      "primary": "sv",
+      "secondary": null
+    },
+    "model": {
+      "size": "small",
+      "compute_type": "int8"
+    },
+    "transcription": {
+      "mode": "fast"
+    }
+  },
+  "created": "2025-04-01T00:00:00Z",
+  "modified": "2025-04-01T00:00:00Z"
+}
