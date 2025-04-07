@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Samtalshantering</title>
+    <title>SalesPilot - Samtalshantering</title>
     <!-- Vue.js CDN -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <style>
@@ -78,11 +78,8 @@
             margin-bottom: 20px;
         }
 
-        .customer-info {
-            margin-bottom: 20px;
-        }
-
-        .info-field {
+        .conversation-header h2 {
+            margin: 0;
             margin-bottom: 10px;
         }
 
@@ -95,29 +92,20 @@
             flex: 2;
         }
 
-        .side-section {
-            flex: 1;
-        }
-
-        .key-points {
+        .transcription-section {
             margin-bottom: 20px;
         }
 
-        .key-point {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 5px;
+        .transcription-output {
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 10px;
+            background: var(--background-light);
+            max-height: 300px;
+            overflow-y: auto;
         }
 
-        .todo-section {
-            margin-bottom: 20px;
-        }
-
-        .todo-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
+        .transcript-entry {
             margin-bottom: 5px;
         }
 
@@ -135,24 +123,6 @@
             border: 1px solid var(--border-color);
             color: var(--text-light);
         }
-
-        input {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            background: var(--background-light);
-            color: var(--text-light);
-        }
-
-        textarea {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            background: var(--background-light);
-            color: var(--text-light);
-        }
     </style>
 </head>
 <body>
@@ -160,12 +130,6 @@
         <aside class="sidebar">
             <div>
                 <button @click="startNewConversation">Nytt samtal</button>
-                <select v-model="selectedTemplate" class="template-select">
-                    <option value="">Välj mall...</option>
-                    <option v-for="template in templates" :value="template.id">
-                        {{ template.name }}
-                    </option>
-                </select>
             </div>
             
             <div class="conversation-list">
@@ -189,84 +153,15 @@
                 <div class="conversation-header">
                     <div>
                         <h2>{{ currentConversation.customerName || 'Namnlöst samtal' }}</h2>
-                        <input v-model="currentConversation.customerName" 
-                               placeholder="Ange kundnamn">
-                    </div>
-                    <div class="actions">
-                        <button class="secondary" @click="saveConversation">Spara</button>
-                    </div>
-                </div>
-
-                <div class="customer-info">
-                    <div class="info-field">
-                        <label>Kontaktperson</label>
-                        <input v-model="currentConversation.contactPerson" placeholder="Ange kontaktperson">
-                    </div>
-                    <div class="info-field">
-                        <label>E-post</label>
-                        <input v-model="currentConversation.email" type="email" placeholder="Ange e-post">
-                    </div>
-                    <div class="info-field">
-                        <label>Telefon</label>
-                        <input v-model="currentConversation.phone" type="tel" placeholder="Ange telefonnummer">
                     </div>
                 </div>
 
                 <div class="conversation-content">
                     <div class="main-section">
-                        <div class="notes-section">
-                            <h3>Anteckningar</h3>
-                            <textarea v-model="currentConversation.notes" 
-                                    placeholder="Skriv anteckningar här..."
-                                    rows="5"></textarea>
-                            <button @click="analyzeNotes" class="secondary" :disabled="isAnalyzing">
-                                {{ isAnalyzing ? 'Analyserar...' : 'Analysera med AI' }}
-                            </button>
-                        </div>
-
-                        <div v-if="currentConversation.analysis" class="analysis-section">
-                            <h3>AI Analys</h3>
-                            <div class="analysis-content">
-                                {{ currentConversation.analysis }}
-                            </div>
-                        </div>
-
-                        <div class="key-points">
-                            <h3>Nyckelpoäng</h3>
-                            <div class="key-points-list">
-                                <div v-for="(point, index) in currentConversation.keyPoints" 
-                                     :key="index" 
-                                     class="key-point">
-                                    <span>{{ point }}</span>
-                                    <button @click="removeKeyPoint(index)" class="remove-btn">×</button>
-                                </div>
-                            </div>
-                            <div class="add-point">
-                                <input v-model="newKeyPoint" 
-                                       @keyup.enter="addKeyPoint"
-                                       placeholder="Lägg till nyckelpoäng">
-                                <button @click="addKeyPoint" class="secondary">Lägg till</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="side-section">
-                        <div class="todo-section">
-                            <h3>Att göra</h3>
-                            <div class="todo-list">
-                                <div v-for="(todo, index) in currentConversation.todos" 
-                                     :key="index" 
-                                     class="todo-item">
-                                    <input type="checkbox" v-model="todo.done">
-                                    <span>{{ todo.text }}</span>
-                                    <button @click="removeTodo(index)" class="remove-btn">×</button>
-                                </div>
-                            </div>
-                            <div class="add-todo">
-                                <input v-model="newTodo" 
-                                       @keyup.enter="addTodo"
-                                       placeholder="Lägg till uppgift">
-                                <button @click="addTodo" class="secondary">Lägg till</button>
+                        <div class="transcription-section">
+                            <h3>Transkription</h3>
+                            <div id="transcription-output" class="transcription-output">
+                                <!-- Transkriptioner kommer att visas här -->
                             </div>
                         </div>
                     </div>
@@ -274,6 +169,7 @@
             </div>
             <div v-else class="no-conversation">
                 <h2>Välj ett samtal eller skapa ett nytt</h2>
+                <p>Klicka på "Nytt samtal" i sidopanelen för att börja!</p>
             </div>
         </main>
     </div>
@@ -285,79 +181,49 @@
             setup() {
                 const conversations = ref([]);
                 const currentConversation = ref(null);
-                const selectedTemplate = ref('');
-                const newKeyPoint = ref('');
-                const newTodo = ref('');
                 const ws = ref(null);
-                const isAnalyzing = ref(false);
-                
-                // WebSocket setup
+
+                // Starta WebSocket-anslutning
                 function setupWebSocket() {
                     ws.value = new WebSocket('ws://localhost:9091');
-                    
+
+                    ws.value.onopen = () => {
+                        console.log('WebSocket anslutning öppnad');
+                    };
+
                     ws.value.onmessage = (event) => {
-                        const data = JSON.parse(event.data);
-                        if (data.type === 'analysis_result') {
-                            if (currentConversation.value) {
-                                currentConversation.value.analysis = data.analysis;
-                                isAnalyzing.value = false;
+                        try {
+                            const data = JSON.parse(event.data);
+                            if (data.type === 'transcription') {
+                                displayTranscription(data.transcription);
                             }
+                        } catch (error) {
+                            console.error('Fel vid hantering av WebSocket-meddelande:', error);
                         }
                     };
 
                     ws.value.onclose = () => {
-                        setTimeout(setupWebSocket, 1000); // Retry connection
+                        console.log('WebSocket anslutning stängd');
+                        // Försök återansluta efter 2 sekunder
+                        setTimeout(setupWebSocket, 2000);
+                    };
+
+                    ws.value.onerror = (error) => {
+                        console.error('WebSocket fel:', error);
                     };
                 }
 
-                // Initialize WebSocket connection
-                setupWebSocket();
-                
-                // Add analyzeNotes function
-                async function analyzeNotes() {
-                    if (!currentConversation.value?.notes || !ws.value || ws.value.readyState !== WebSocket.OPEN) {
-                        return;
-                    }
-                    
-                    isAnalyzing.value = true;
-                    ws.value.send(JSON.stringify({
-                        command: 'analyze_notes',
-                        notes: currentConversation.value.notes
-                    }));
+                // Visa transkription i gränssnittet
+                function displayTranscription(transcription) {
+                    const transcriptionOutput = document.getElementById('transcription-output');
+                    const transcriptEntry = document.createElement('div');
+                    transcriptEntry.className = 'transcript-entry';
+                    transcriptEntry.textContent = transcription;
+                    transcriptionOutput.appendChild(transcriptEntry);
                 }
 
-                const templates = {
-                    enphase: {
-                        id: 'enphase',
-                        name: 'Enphase',
-                        keyPoints: [
-                            'Systemstorlek',
-                            'Antal paneler',
-                            'Mikroväxlare',
-                            'Batteriönskemål'
-                        ],
-                        defaultTodos: [
-                            'Skicka Enphase produktblad',
-                            'Kontrollera takritning',
-                            'Verifiera elförbrukning'
-                        ]
-                    },
-                    '1k5': {
-                        id: '1k5',
-                        name: '1K5',
-                        keyPoints: [
-                            'Systemstorlek',
-                            'Antal paneler',
-                            'Växelriktare',
-                            'Installation'
-                        ],
-                        defaultTodos: [
-                            'Skicka 1K5 produktblad',
-                            'Kontrollera takritning',
-                            'Verifiera elförbrukning'
-                        ]
-                    }
-                };
+                // Initialisera WebSocket vid start
+                setupWebSocket();
 
                 function startNewConversation() {
                     const newConv = {
@@ -369,16 +235,10 @@
                         phone: '',
                         notes: '',
                         analysis: '',
-                        template: selectedTemplate.value,
+                        template: '',
                         todos: [],
                         keyPoints: []
                     };
-                    
-                    if (selectedTemplate.value && templates[selectedTemplate.value]) {
-                        const template = templates[selectedTemplate.value];
-                        newConv.keyPoints = [...template.keyPoints];
-                        newConv.todos = template.defaultTodos.map(text => ({ text, done: false }));
-                    }
                     
                     conversations.value.unshift(newConv);
                     selectConversation(newConv);
@@ -386,22 +246,6 @@
 
                 function selectConversation(conv) {
                     currentConversation.value = conv;
-                }
-
-                function saveConversation() {
-                    if (!currentConversation.value) return;
-                    
-                    const savedConvs = JSON.parse(localStorage.getItem('conversations') || '[]');
-                    const index = savedConvs.findIndex(c => c.id === currentConversation.value.id);
-                    
-                    if (index >= 0) {
-                        savedConvs[index] = currentConversation.value;
-                    } else {
-                        savedConvs.push(currentConversation.value);
-                    }
-                    
-                    localStorage.setItem('conversations', JSON.stringify(savedConvs));
-                    alert('Samtalet har sparats');
                 }
 
                 function formatDate(date) {
@@ -414,62 +258,12 @@
                     });
                 }
 
-                function addKeyPoint() {
-                    if (!newKeyPoint.value.trim() || !currentConversation.value) return;
-                    
-                    if (!currentConversation.value.keyPoints) {
-                        currentConversation.value.keyPoints = [];
-                    }
-                    
-                    currentConversation.value.keyPoints.push(newKeyPoint.value.trim());
-                    newKeyPoint.value = '';
-                }
-
-                function removeKeyPoint(index) {
-                    if (!currentConversation.value?.keyPoints) return;
-                    currentConversation.value.keyPoints.splice(index, 1);
-                }
-
-                function addTodo() {
-                    if (!newTodo.value.trim() || !currentConversation.value) return;
-                    
-                    if (!currentConversation.value.todos) {
-                        currentConversation.value.todos = [];
-                    }
-                    
-                    currentConversation.value.todos.push({
-                        text: newTodo.value.trim(),
-                        done: false
-                    });
-                    newTodo.value = '';
-                }
-
-                function removeTodo(index) {
-                    if (!currentConversation.value?.todos) return;
-                    currentConversation.value.todos.splice(index, 1);
-                }
-
-                // Ladda sparade samtal vid start
-                const savedConvs = JSON.parse(localStorage.getItem('conversations') || '[]');
-                conversations.value = savedConvs;
-
                 return {
                     conversations,
                     currentConversation,
-                    selectedTemplate,
-                    newKeyPoint,
-                    newTodo,
-                    isAnalyzing,
-                    templates,
                     startNewConversation,
                     selectConversation,
-                    saveConversation,
-                    formatDate,
-                    addKeyPoint,
-                    removeKeyPoint,
-                    addTodo,
-                    removeTodo,
-                    analyzeNotes
+                    formatDate
                 };
             }
         });

@@ -171,23 +171,23 @@
 <body>
     <div class="container">
         <nav class="nav-menu">
-            <a href="menu.html" class="menu-item">
+            <a href="index.html" class="menu-item">
                 <span class="menu-icon">⬅️</span>
                 <span>Tillbaka</span>
             </a>
-            <div class="menu-item active">
+            <div class="menu-item active" data-section="audio">
                 <span class="menu-icon">🎙️</span>
                 <span>Ljud</span>
             </div>
-            <div class="menu-item">
+            <div class="menu-item" data-section="language">
                 <span class="menu-icon">🗣️</span>
                 <span>Språk</span>
             </div>
-            <div class="menu-item">
+            <div class="menu-item" data-section="model">
                 <span class="menu-icon">🤖</span>
                 <span>AI-modell</span>
             </div>
-            <div class="menu-item">
+            <div class="menu-item" data-section="system">
                 <span class="menu-icon">🔧</span>
                 <span>System</span>
             </div>
@@ -195,23 +195,23 @@
 
         <main class="settings-content">
             <!-- Ljudinställningar -->
-            <div class="settings-card">
+            <div class="settings-card" id="audio-settings">
                 <div class="settings-group">
                     <h3>Ljudinställningar</h3>
                     <div class="setting-item">
-                        <label for="audio-device">Ljudenhet</label>
-                        <select id="audio-device"></select>
+                        <label for="audio_device_id">Ljudenhet</label>
+                        <select id="audio_device_id"></select>
                     </div>
                     <div class="setting-item">
-                        <label for="noise-threshold">Bruströskel</label>
-                        <input type="range" id="noise-threshold" min="0" max="100" value="20">
+                        <label for="noise_threshold">Bruströskel</label>
+                        <input type="range" id="noise_threshold" min="0" max="100" value="20">
                         <div class="setting-value">
                             <span id="noise-threshold-value">20</span>%
                         </div>
                     </div>
                     <div class="setting-item">
-                        <label for="sample-rate">Samplingsfrekvens</label>
-                        <select id="sample-rate">
+                        <label for="sample_rate">Samplingsfrekvens</label>
+                        <select id="sample_rate">
                             <option value="16000">16 kHz (rekommenderad)</option>
                             <option value="44100">44.1 kHz (högkvalitet)</option>
                             <option value="48000">48 kHz (studio)</option>
@@ -221,12 +221,12 @@
             </div>
 
             <!-- Språkinställningar -->
-            <div class="settings-card">
+            <div class="settings-card" id="language-settings">
                 <div class="settings-group">
                     <h3>Språkinställningar</h3>
                     <div class="setting-item">
-                        <label for="language">Huvudspråk</label>
-                        <select id="language">
+                        <label for="whisper_language">Huvudspråk</label>
+                        <select id="whisper_language">
                             <option value="sv" selected>Svenska</option>
                             <option value="en">Engelska</option>
                             <option value="no">Norska</option>
@@ -234,8 +234,8 @@
                         </select>
                     </div>
                     <div class="setting-item">
-                        <label for="secondary-language">Sekundärt språk (valfritt)</label>
-                        <select id="secondary-language">
+                        <label for="secondary_language">Sekundärt språk (valfritt)</label>
+                        <select id="secondary_language">
                             <option value="">Inget</option>
                             <option value="en">Engelska</option>
                             <option value="sv">Svenska</option>
@@ -247,45 +247,60 @@
             </div>
 
             <!-- AI-modellinställningar -->
-            <div class="settings-card">
+            <div class="settings-card" id="model-settings">
                 <div class="settings-group">
                     <h3>AI-modellinställningar</h3>
                     <div class="setting-item">
-                        <label for="model-size">Modellstorlek</label>
-                        <select id="model-size">
+                        <label for="whisper_model">Modellstorlek</label>
+                        <select id="whisper_model">
                             <option value="tiny">Tiny (snabb)</option>
                             <option value="base">Base (balanserad)</option>
                             <option value="small">Small (noggrann)</option>
                             <option value="medium" selected>Medium (rekommenderad)</option>
-                            <option value="large">Large (mest noggrann)</option>
+                            <option value="large-v2">Large-v2 (mest noggrann)</option>
                         </select>
                     </div>
                     <div class="setting-item">
-                        <label for="compute-type">Beräkningstyp</label>
-                        <select id="compute-type">
+                        <label for="compute_type">Beräkningstyp</label>
+                        <select id="compute_type">
                             <option value="float32">float32 (högsta kvalitet)</option>
                             <option value="float16" selected>float16 (balanserad)</option>
                             <option value="int8">int8 (snabbast)</option>
+                            <option value="int8_float16">int8_float16 (hybrid)</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <label for="use_gpu">Använd GPU (om tillgänglig)</label>
+                        <select id="use_gpu">
+                            <option value="true">Ja</option>
+                            <option value="false">Nej</option>
                         </select>
                     </div>
                 </div>
             </div>
 
             <!-- Systeminställningar -->
-            <div class="settings-card">
+            <div class="settings-card" id="system-settings">
                 <div class="settings-group">
                     <h3>Systeminställningar</h3>
                     <div class="setting-item">
-                        <label for="transcription-mode">Transkriptionsläge</label>
-                        <select id="transcription-mode">
+                        <label for="transcription_mode">Transkriptionsläge</label>
+                        <select id="transcription_mode">
                             <option value="balanced" selected>Balanserad (rekommenderad)</option>
                             <option value="fast">Snabb (lägre kvalitet)</option>
                             <option value="accurate">Noggrann (långsammare)</option>
                         </select>
                     </div>
                     <div class="setting-item">
-                        <label for="save-path">Sökväg för sparade filer</label>
-                        <input type="text" id="save-path" placeholder="t.ex. C:\Transkriptioner">
+                        <label for="save_path">Sökväg för sparade filer</label>
+                        <input type="text" id="save_path" placeholder="t.ex. C:\Transkriptioner">
+                    </div>
+                    <div class="setting-item">
+                        <label for="use_vad">Använd Voice Activity Detection</label>
+                        <select id="use_vad">
+                            <option value="true" selected>Ja (rekommenderad)</option>
+                            <option value="false">Nej</option>
+                        </select>
                     </div>
                 </div>
             </div>
@@ -299,73 +314,148 @@
     </div>
 
     <script>
+        // WebSocket-anslutning
+        let ws = null;
         let originalSettings = {};
         
-        // Ladda ljudenheter
+        // Starta WebSocket-anslutning
+        function setupWebSocket() {
+            ws = new WebSocket('ws://localhost:9091');
+            
+            ws.onopen = () => {
+                console.log('WebSocket anslutning öppnad');
+                showStatus('Ansluten till servern', 'success');
+                
+                // När anslutningen är öppen, begär aktuella inställningar
+                requestCurrentSettings();
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('Mottaget WebSocket-meddelande:', data);
+                    
+                    if (data.type === 'settings') {
+                        console.log('Inställningar mottagna:', data.settings);
+                        applySettings(data.settings);
+                    } else if (data.type === 'settings_updated') {
+                        showStatus('Inställningar sparade', 'success');
+                    } else if (data.type === 'error') {
+                        showStatus(`Fel: ${data.message}`, 'error');
+                    }
+                } catch (error) {
+                    console.error('Fel vid hantering av WebSocket-meddelande:', error);
+                }
+            };
+            
+            ws.onclose = () => {
+                console.log('WebSocket anslutning stängd');
+                showStatus('Anslutning till servern förlorad', 'error');
+                
+                // Försök återansluta efter 2 sekunder
+                setTimeout(setupWebSocket, 2000);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket fel:', error);
+                showStatus('Fel i anslutningen till servern', 'error');
+            };
+        }
+        
+        // Begär aktuella inställningar från servern
+        function requestCurrentSettings() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                console.log('Begär nuvarande inställningar');
+                ws.send(JSON.stringify({
+                    command: 'get_settings'
+                }));
+            } else {
+                console.error('WebSocket inte ansluten');
+            }
+        }
+        
+        // Tillämpa inställningar på gränssnittet
+        function applySettings(settings) {
+            console.log('Tillämpar inställningar:', settings);
+            originalSettings = {...settings};
+            
+            // Gå igenom alla inställningar och tillämpa dem på UI-element
+            Object.entries(settings).forEach(([key, value]) => {
+                const element = document.getElementById(key);
+                if (element) {
+                    if (typeof value === 'boolean') {
+                        element.value = value.toString();
+                    } else {
+                        element.value = value;
+                    }
+                    
+                    // Om detta är brusströskeln, uppdatera visningsvärdet
+                    if (key === 'noise_threshold') {
+                        document.getElementById('noise-threshold-value').textContent = value;
+                    }
+                }
+            });
+        }
+
+        // Ladda tillgängliga ljudenheter
         async function loadAudioDevices() {
             try {
                 const devices = await navigator.mediaDevices.enumerateDevices();
-                const audioSelect = document.getElementById('audio-device');
+                const audioSelect = document.getElementById('audio_device_id');
                 
-                audioSelect.innerHTML = devices
-                    .filter(device => device.kind === 'audioinput')
-                    .map(device => `<option value="${device.deviceId}">${device.label || `Mikrofonenhet ${device.deviceId}`}</option>`)
-                    .join('');
+                // Filter ut bara audioinput-enheter
+                const audioInputDevices = devices.filter(device => device.kind === 'audioinput');
+                
+                // Lägg till alternativ för varje enhet
+                audioInputDevices.forEach((device, index) => {
+                    const option = document.createElement('option');
+                    option.value = index; // Använd index som värde
+                    option.text = device.label || `Mikrofonenhet ${index}`;
+                    audioSelect.appendChild(option);
+                });
+                
+                console.log('Ljudenheter laddade:', audioInputDevices.length);
             } catch (error) {
-                console.error('Error loading audio devices:', error);
+                console.error('Fel vid laddning av ljudenheter:', error);
+                showStatus('Kunde inte läsa in ljudenheter', 'error');
             }
         }
 
-        // Spara inställningar
-        async function saveSettings() {
+        // Spara inställningar till servern
+        function saveSettings() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                showStatus('Inte ansluten till servern', 'error');
+                return;
+            }
+            
+            // Samla in alla inställningar från formuläret
             const settings = {
-                audio: {
-                    device: document.getElementById('audio-device').value,
-                    noiseThreshold: document.getElementById('noise-threshold').value,
-                    sampleRate: document.getElementById('sample-rate').value
-                },
-                language: {
-                    primary: document.getElementById('language').value,
-                    secondary: document.getElementById('secondary-language').value
-                },
-                model: {
-                    size: document.getElementById('model-size').value,
-                    computeType: document.getElementById('compute-type').value
-                },
-                system: {
-                    transcriptionMode: document.getElementById('transcription-mode').value,
-                    savePath: document.getElementById('save-path').value
-                }
+                audio_device_id: document.getElementById('audio_device_id').value,
+                noise_threshold: document.getElementById('noise_threshold').value,
+                sample_rate: document.getElementById('sample_rate').value,
+                whisper_language: document.getElementById('whisper_language').value,
+                secondary_language: document.getElementById('secondary_language').value,
+                whisper_model: document.getElementById('whisper_model').value,
+                compute_type: document.getElementById('compute_type').value,
+                use_gpu: document.getElementById('use_gpu').value === 'true',
+                transcription_mode: document.getElementById('transcription_mode').value,
+                save_path: document.getElementById('save_path').value || '',
+                use_vad: document.getElementById('use_vad').value === 'true'
             };
-
-            try {
-                const response = await fetch('http://localhost:9091/settings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(settings)
-                });
-
-                if (response.ok) {
-                    showStatus('Inställningar sparade', 'success');
-                    originalSettings = {...settings};
-                } else {
-                    throw new Error('Kunde inte spara inställningar');
-                }
-            } catch (error) {
-                showStatus('Fel vid sparande: ' + error.message, 'error');
-            }
+            
+            console.log('Sparar inställningar:', settings);
+            
+            // Skicka inställningar via WebSocket
+            ws.send(JSON.stringify({
+                command: 'update_settings',
+                settings: settings
+            }));
         }
 
-        // Återställ inställningar
+        // Återställ inställningar till originalvärdena
         function resetSettings() {
-            Object.entries(originalSettings).forEach(([category, values]) => {
-                Object.entries(values).forEach(([key, value]) => {
-                    const element = document.getElementById(`${category}-${key}`);
-                    if (element) {
-                        element.value = value;
-                    }
-                });
-            });
+            console.log('Återställer inställningar till:', originalSettings);
+            applySettings(originalSettings);
         }
 
         // Visa statusmeddelande
@@ -375,35 +465,75 @@
             status.className = `status-message ${type}`;
             status.style.display = 'block';
             
+            // Dölj meddelandet efter 3 sekunder
             setTimeout(() => {
                 status.style.display = 'none';
             }, 3000);
+            
+            console.log(`Status (${type}):`, message);
+        }
+
+        // Visa och dölj olika inställningskort baserat på menyval
+        function setupNavigation() {
+            const menuItems = document.querySelectorAll('.menu-item[data-section]');
+            const settingsCards = document.querySelectorAll('.settings-card');
+            
+            // För varje menyalternativ, lägg till en klick-hanterare
+            menuItems.forEach(item => {
+                item.addEventListener('click', () => {
+                    // Ta bort aktiv-klass från alla menyalternativ
+                    menuItems.forEach(i => i.classList.remove('active'));
+                    // Lägg till aktiv-klass på det klickade alternativet
+                    item.classList.add('active');
+                    
+                    // Visa rätt inställningskort och dölj andra
+                    const sectionId = item.getAttribute('data-section');
+                    settingsCards.forEach(card => {
+                        if (card.id === `${sectionId}-settings`) {
+                            card.style.display = 'block';
+                        } else {
+                            card.style.display = 'none';
+                        }
+                    });
+                });
+            });
+            
+            // Aktivera första menyalternativet som standard
+            if (menuItems.length > 0) {
+                menuItems[0].click();
+            }
         }
 
         // Initialisera sidan
         document.addEventListener('DOMContentLoaded', () => {
-            // Begär mikrofonåtkomst och ladda ljudenheter
+            console.log('Sida laddad, initialiserar...');
+            
+            // Starta WebSocket-anslutning
+            setupWebSocket();
+            
+            // Konfigurera navigation mellan inställningsgrupper
+            setupNavigation();
+            
+            // Begär mikrofonåtkomst och ladda tillgängliga ljudenheter
             navigator.mediaDevices.getUserMedia({ audio: true })
-                .then(loadAudioDevices)
-                .catch(error => console.error('Error accessing microphone:', error));
+                .then(() => {
+                    console.log('Mikrofonåtkomst beviljad');
+                    loadAudioDevices();
+                })
+                .catch(error => {
+                    console.error('Kunde inte få åtkomst till mikrofonen:', error);
+                    showStatus('Kunde inte få åtkomst till mikrofonen', 'error');
+                });
 
-            // Uppdatera bruströskelns värde när den ändras
-            const noiseThreshold = document.getElementById('noise-threshold');
+            // Koppla in händelsehanterare för bruströskeln
+            const noiseThreshold = document.getElementById('noise_threshold');
             const noiseThresholdValue = document.getElementById('noise-threshold-value');
             
-            noiseThreshold.addEventListener('input', (e) => {
-                noiseThresholdValue.textContent = e.target.value;
-            });
-
-            // Hantera menynavigering
-            document.querySelectorAll('.menu-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    document.querySelectorAll('.menu-item').forEach(i => i.classList.remove('active'));
-                    if (!item.querySelector('a')) {  // Skippa tillbaka-knappen
-                        item.classList.add('active');
-                    }
+            if (noiseThreshold && noiseThresholdValue) {
+                noiseThreshold.addEventListener('input', (e) => {
+                    noiseThresholdValue.textContent = e.target.value;
                 });
-            });
+            }
         });
     </script>
 </body>

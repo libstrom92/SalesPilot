@@ -28,8 +28,16 @@ config = load_config()  # Load configuration from .env
 PORT = int(os.getenv("WEBSOCKET_PORT", "9091"))
 SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
 
+def find_voicemeeter_device():
+    """Find Voicemeeter B1 output device"""
+    for device in sd.query_devices():
+        if isinstance(device, dict) and "Voicemeeter Out B1" in device.get('name', ''):
+            logger.info(f"Found Voicemeeter B1: {device['name']} (ID: {device['index']})")
+            return device['index']
+    raise RuntimeError("Voicemeeter B1 not found. Please ensure Voicemeeter is running.")
+
 try:
-    DEVICE = int(os.getenv("AUDIO_DEVICE_ID", "2").strip())  # Strip spaces/comments and convert to int
+    DEVICE = find_voicemeeter_device()
 except ValueError:
     logger.warning("Invalid value for AUDIO_DEVICE_ID. Using default value 2.")
     DEVICE = 2  # Default to 2 if invalid
@@ -106,84 +114,78 @@ class ProcessingThread(threading.Thread):
     def __init__(self, websocket=None):
         super().__init__()
         self.daemon = True
-        self.stream = None
+        self.device_id = find_voicemeeter_device()
         self.running = False
         self.audio_queue = queue.Queue()
         self.processor = StreamingProcessor(config)
         self.websocket = websocket
-        self.audio_frames_received = 0
-        self.last_log_time = time.time()
-
-    def process_audio(self, audio_data):
-        """Process audio data through the streaming processor"""
-        if self.processor:
-            return self.processor.process_streaming(audio_data)
-        return None
+        
+        # Start listening to Voicemeeter immediately
+        self.start_recording()
 
     def start_recording(self):
-        """Start recording from the audio device."""
+        """Start recording from Voicemeeter B1"""
         self.running = True
-        logger.info(f"Starting audio recording with device={DEVICE}, rate={SAMPLE_RATE}, channels={CHANNELS}")
+        logger.info(f"Starting Voicemeeter B1 monitoring on device {self.device_id}")
         try:
             self.stream = sd.InputStream(
                 samplerate=SAMPLE_RATE,
                 channels=CHANNELS,
-                device=DEVICE,
+                device=self.device_id,
                 callback=self.audio_callback
             )
             self.stream.start()
-            logger.info("Audio recording started successfully.")
+            logger.info("Voicemeeter B1 monitoring started successfully.")
         except Exception as e:
-            logger.error(f"Failed to start audio recording: {e}")
+            logger.error(f"Failed to start Voicemeeter B1 monitoring: {e}")
             self.running = False
-            # Informera klienten om felet
+            # Inform the client about the error
             if self.websocket:
                 message_queue.put({
                     "websocket": self.websocket,
                     "message": {
-                        "error": f"Kunde inte starta ljudinspelning: {e}",
+                        "error": f"Could not start Voicemeeter B1 monitoring: {e}",
                         "timestamp": time.time()
                     }
                 })
 
     def stop_recording(self):
-        """Stop the audio recording."""
+        """Stop the Voicemeeter B1 monitoring."""
         if self.stream:
             try:
                 self.stream.stop()
                 self.stream.close()
-                logger.info(f"Audio recording stopped. Processed {self.audio_frames_received} frames.")
+                logger.info("Voicemeeter B1 monitoring stopped.")
             except Exception as e:
-                logger.error(f"Error stopping audio stream: {e}")
+                logger.error(f"Error stopping Voicemeeter B1 stream: {e}")
         self.running = False
 
     def audio_callback(self, indata, frames, time_info, status):
-        """Callback to handle incoming audio data."""
+        """Callback to handle incoming audio data from Voicemeeter B1."""
         current_time = time.time()
         
-        # Logga varje sekund
+        # Log every second
         if current_time - self.last_log_time >= 1.0:
             self.last_log_time = current_time
-            # Lägg till kontroll av ljudnivå för att avgöra om ljud tas upp
+            # Add audio level check to determine if audio is being captured
             max_audio_level = np.abs(indata).max()
-            logger.debug(f"Audio callback active. Queue size: {self.audio_queue.qsize()}, Frames: {self.audio_frames_received}, Level: {max_audio_level:.4f}")
+            logger.debug(f"Audio callback active. Queue size: {self.audio_queue.qsize()}, Level: {max_audio_level:.4f}")
             
         if status:
             logger.warning(f"Audio stream status: {status}")
             
         if self.running:
-            # Kontrollera om ljudet är tyst
-            if np.abs(indata).max() < 0.001:  # Mycket låg ljudnivå
+            # Check if the audio is silent
+            if np.abs(indata).max() < 0.001:  # Very low audio level
                 self.quiet_frames = self.quiet_frames + 1 if hasattr(self, 'quiet_frames') else 1
-                if self.quiet_frames % 100 == 0:  # Logga var 100:e tyst frame
-                    logger.warning(f"Receiving silent audio frames ({self.quiet_frames} in a row). Check your microphone settings.")
+                if self.quiet_frames % 100 == 0:  # Log every 100 silent frames
+                    logger.warning(f"Receiving silent audio frames ({self.quiet_frames} in a row). Check your Voicemeeter settings.")
             else:
                 if hasattr(self, 'quiet_frames') and self.quiet_frames > 100:
                     logger.info(f"Audio detected after {self.quiet_frames} silent frames.")
                 self.quiet_frames = 0
             
             self.audio_queue.put(indata.copy())
-            self.audio_frames_received += 1
 
     def run(self):
         """Process audio data from the queue."""
@@ -194,27 +196,27 @@ class ProcessingThread(threading.Thread):
         
         while self.running:
             try:
-                # Skicka ett periodiskt testmeddelande varje 5 sekunder för att verifiera WebSocket-flödet
+                # Send a periodic test message every 5 seconds to verify WebSocket flow
                 current_time = time.time()
                 if current_time - last_test_message >= 5.0 and self.websocket:
                     message_queue.put({
                         "websocket": self.websocket,
                         "message": {
                             "type": "transcription", 
-                            "text": f"Test meddelande {int(current_time)}. Ljud processas...",
+                            "text": f"Test message {int(current_time)}. Processing audio...",
                             "timestamp": current_time
                         }
                     })
                     last_test_message = current_time
                     logger.debug("Sent periodic test message")
                 
-                # Använd timeout för att inte blockera för länge
+                # Use a timeout to avoid blocking for too long
                 try:
                     audio_data = self.audio_queue.get(timeout=1)
                 except queue.Empty:
                     continue
                 
-                # Logga var 10:e sekund
+                # Log every 10 seconds
                 if current_time - last_process_time >= 10.0:
                     logger.debug(f"Still processing audio. Processed {processing_count} chunks so far.")
                     last_process_time = current_time
@@ -225,7 +227,7 @@ class ProcessingThread(threading.Thread):
                 processing_time = time.time() - processing_start
                 processing_count += 1
                 
-                if processing_time > 0.5:  # Logga om det tar mer än 0.5 sekunder
+                if processing_time > 0.5:  # Log if it takes more than 0.5 seconds
                     logger.warning(f"Long processing time: {processing_time:.2f}s for audio chunk")
                 
                 if text and text.strip():
@@ -257,7 +259,7 @@ async def process_messages():
     """Process outgoing WebSocket messages from the queue"""
     logger.info("Started message processing task")
     while True:
-        await asyncio.sleep(0.05)  # Snabbare kontroll för att minska latensen
+        await asyncio.sleep(0.05)  # Faster check to reduce latency
         try:
             # Non-blocking check for messages
             try:
@@ -265,24 +267,24 @@ async def process_messages():
                 websocket = item["websocket"]
                 message = item["message"]
                 
-                # Kontrollera om websocket fortfarande är öppen
+                # Check if the WebSocket is still open
                 if not websocket.open:
                     logger.warning("WebSocket is closed, can't send message")
                     message_queue.task_done()
                     continue
                 
                 try:
-                    # Konvertera meddelandet till JSON
+                    # Convert the message to JSON
                     message_json = json.dumps(message)
                     logger.debug(f"Sending message to client: {message_json[:100]}...")
                     
-                    # Skicka meddelandet och vänta tills det är klart
+                    # Send the message and wait for it to complete
                     await websocket.send(message_json)
                     logger.debug("Message sent successfully")
                 except Exception as send_err:
                     logger.error(f"Error sending message: {send_err}")
                 
-                # Markera uppgiften som klar
+                # Mark the task as done
                 message_queue.task_done()
                 
             except queue.Empty:
@@ -308,16 +310,16 @@ async def handle_websocket(websocket: WebSocketServerProtocol):
                     recording_thread.start()
                     recording_thread.start_recording()
                     
-                    # Skicka initial statusinformation
+                    # Send initial status information
                     await websocket.send(json.dumps({
                         "status": "recording_started",
                         "timestamp": time.time()}))
                     
-                    # Skicka ett testmeddelande för att verifiera WebSocket-kommunikation
+                    # Send a test message to verify WebSocket communication
                     logger.info("Sending test transcription message to client")
                     await websocket.send(json.dumps({
                         "type": "transcription", 
-                        "text": "Server ansluten. Testar WebSocket-kommunikation.",
+                        "text": "Server connected. Testing WebSocket communication.",
                         "timestamp": time.time()
                     }))
 

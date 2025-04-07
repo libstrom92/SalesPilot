@@ -48,7 +48,7 @@
 
         .container {
             display: grid;
-            grid-template-columns: 250px 1fr; /* Ändra till två kolumner */
+            grid-template-columns: 250px 1fr;
             gap: 20px;
             margin-top: 20px;
             height: auto;
@@ -383,6 +383,61 @@
     <script>
         const WS_URL = 'ws://localhost:9091';
         let ws = null;
-        
-        // View management
-        const views = {};
+
+        // Starta WebSocket-anslutning
+        function setupWebSocket() {
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                console.log('WebSocket anslutning öppnad');
+                document.getElementById('status').textContent = 'Ansluten till servern';
+                document.getElementById('status').className = 'status connected';
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'transcription') {
+                        updateTranscription(data.transcription);
+                    }
+                } catch (error) {
+                    console.error('Fel vid hantering av WebSocket-meddelande:', error);
+                }
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket anslutning stängd');
+                document.getElementById('status').textContent = 'Anslutning till servern förlorad';
+                document.getElementById('status').className = 'status disconnected';
+
+                // Försök återansluta efter 2 sekunder
+                setTimeout(setupWebSocket, 2000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket fel:', error);
+            };
+        }
+
+        // Uppdatera transkription i gränssnittet
+        function updateTranscription(newText) {
+            const transcriptionContainer = document.getElementById('main-content');
+            let transcriptionElement = transcriptionContainer.querySelector('.transcription-text');
+
+            if (!transcriptionElement) {
+                transcriptionElement = document.createElement('div');
+                transcriptionElement.className = 'transcription-text';
+                transcriptionContainer.appendChild(transcriptionElement);
+            }
+
+            // Lägg till ny text till befintlig transkription
+            transcriptionElement.textContent += ` ${newText}`;
+        }
+
+        // Initialisera sidan
+        document.addEventListener('DOMContentLoaded', () => {
+            setupWebSocket();
+        });
+    </script>
+</body>
+</html>
