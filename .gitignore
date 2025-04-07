@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+myenv/
+.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+.env
+.env.bak
+
+# Model files and data
+models/
+*.bin
+*.pt
+*.pth
+*.onnx
+*.model
+
+# Logs och temporära filer
+logs/
+*.log
+*.swp
+*.tmp
+*.temp
+
+# OS-specifika filer
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE-filer
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+*.code-workspace
+
+# Stora filer och personliga tokens
+*.wav
+*.mp3
+*.mp4
+*token*
+
+# Känsliga filer
+client_secret*.json
+conversation_logs/
+
+# Dependencies
+node_modules/

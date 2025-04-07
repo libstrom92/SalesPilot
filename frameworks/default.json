@@ -1,0 +1,25 @@
+{
+  "id": "default",
+  "name": "Standardinställningar",
+  "description": "Rekommenderade standardinställningar för de flesta situationer",
+  "settings": {
+    "audio": {
+      "noise_threshold": 20,
+      "sample_rate": 16000,
+      "channels": 1
+    },
+    "language": {
+      "primary": "sv",
+      "secondary": null
+    },
+    "model": {
+      "size": "medium",
+      "compute_type": "float16"
+    },
+    "transcription": {
+      "mode": "balanced"
+    }
+  },
+  "created": "2025-04-01T00:00:00Z",
+  "modified": "2025-04-01T00:00:00Z"
+}

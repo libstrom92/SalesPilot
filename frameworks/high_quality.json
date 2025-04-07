@@ -1,0 +1,25 @@
+{
+  "id": "high_quality",
+  "name": "Hög kvalitet",
+  "description": "Optimerad för bästa möjliga kvalitet och noggrannhet, passar bra för viktiga möten och intervjuer",
+  "settings": {
+    "audio": {
+      "noise_threshold": 15,
+      "sample_rate": 44100,
+      "channels": 1
+    },
+    "language": {
+      "primary": "sv",
+      "secondary": "en"
+    },
+    "model": {
+      "size": "large",
+      "compute_type": "float32"
+    },
+    "transcription": {
+      "mode": "accurate"
+    }
+  },
+  "created": "2025-04-01T00:00:00Z",
+  "modified": "2025-04-01T00:00:00Z"
+}

@@ -1,0 +1,25 @@
+{
+  "audio": {
+    "noise_threshold": 20,
+    "sample_rate": 16000,
+    "channels": 1,
+    "chunk_size": 512,
+    "buffer_duration": 2
+  },
+  "language": {
+    "primary": "sv",
+    "secondary": null
+  },
+  "model": {
+    "size": "medium",
+    "compute_type": "float16"
+  },
+  "transcription": {
+    "mode": "balanced",
+    "save_path": "conversation_logs"
+  },
+  "server": {
+    "port": 9091,
+    "websocket_host": "0.0.0.0"
+  }
+}
