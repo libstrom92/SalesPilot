@@ -26,15 +26,16 @@ while True:
     except ValueError as e:
         print(f"❌ Fel: {e}")
 
-print(f"\n🎙️ Spelar in {DURATION} sekunder från enhet ID {selected_id}...")
+print(f"\n🎙️ Spelar in {DURATION} sekunder i stereo från enhet ID {selected_id}...")
 
-recording = sd.rec(int(DURATION * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=1, dtype='int16', device=selected_id)
+# STEREO: channels=2
+recording = sd.rec(int(DURATION * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=2, dtype='int16', device=selected_id)
 sd.wait()
 
-# Spara som WAV-fil
+# Spara som WAV-fil i stereo
 with wave.open(OUTPUT_FILE, 'wb') as wf:
-    wf.setnchannels(1)
-    wf.setsampwidth(2)  # 16 bit = 2 byte
+    wf.setnchannels(2)              # stereo
+    wf.setsampwidth(2)              # 16 bit = 2 byte
     wf.setframerate(SAMPLE_RATE)
     wf.writeframes(recording.tobytes())
 

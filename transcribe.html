@@ -493,36 +493,33 @@
                 };
 
                 websocket.onmessage = (event) => {
+                    console.log("RAW WebSocket message:", event.data);
                     try {
                         const data = JSON.parse(event.data);
-                        console.log('Parsed WebSocket message:', data);
-                        
-                        if (data.type === 'transcription') {
+                        console.log("Parsed message data:", data);
+
+                        if (data.type === 'transcription' && data.text && data.text.trim()) {
+                            console.log('Received transcription:', data.text);
                             addTranscriptionEntry(data.text, data.timestamp);
                             transcriptHistory.push(data);
                             toggleRealtimeIndicator(true);
                             transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
-                            
+
                             // Update speaker segments if diarization data is available
                             if (data.speakers) {
+                                console.log('Updating speaker segments:', data.speakers);
                                 updateSpeakerSegments(data.speakers);
                                 speakerSegmentsCard.style.display = 'block';
                             }
-                        } else if (data.status === 'recording_started') {
-                            console.log('Recording started');
-                            transcriptContainer.innerHTML = '';
-                            transcriptHistory = [];
-                            startButton.textContent = 'Stoppa inspelning';
-                            toggleRealtimeIndicator(true);
-                        } else if (data.status === 'recording_stopped') {
-                            console.log('Recording stopped');
-                            startButton.textContent = 'Starta inspelning';
-                            toggleRealtimeIndicator(false);
                         } else if (data.error) {
+                            console.error('Error received from server:', data.error);
                             showError(data.error);
+                        } else {
+                            console.warn('Unexpected message format:', data);
                         }
                     } catch (error) {
-                        console.error('Error parsing message:', error);
+                        console.error('WebSocket message parsing error:', error);
+                        console.error('Error parsing message:', error, 'Raw data:', event.data);
                         showError('Kunde inte tolka meddelande från servern.');
                     }
                 };
@@ -573,6 +570,7 @@
         }
 
         function addTranscriptionEntry(text, timestamp) {
+            console.log("Adding transcription entry:", text);
             const entry = document.createElement('div');
             entry.className = 'transcript-entry speaker-1';
             entry.style.animation = 'fadeIn 0.3s ease-in';
@@ -580,17 +578,19 @@
             const bubble = document.createElement('div');
             bubble.className = 'speaker-bubble';
             bubble.textContent = text;
+            console.log("Created bubble element with text:", text);
             entry.appendChild(bubble);
 
             if (timestamp) {
                 const meta = document.createElement('div');
                 meta.className = 'transcript-meta';
                 const date = new Date(timestamp * 1000);
-                meta.textContent = `${date.toLocaleTimeString()}`;
+                meta.textContent = date.toLocaleTimeString();
                 entry.appendChild(meta);
             }
 
             transcriptContainer.appendChild(entry);
+            transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
         }
 
         // Show/hide loading indicator

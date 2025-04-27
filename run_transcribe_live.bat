@@ -31,12 +31,20 @@ if not exist ".env" (
 REM Start the system
 echo Starting transcription system...
 python transcribe_live.py
+if errorlevel 1 goto :error
 
-REM If we get here, there was an error
+REM Om allt gick bra, avsluta
+exit /b 0
+
+:error
 echo.
-echo Om det uppstod fel, kontrollera att:
-echo 1. Du har konfigurerat .env med korrekt HF_AUTH_TOKEN
-echo 2. Du har valt rätt ljudenhet (kör hitta_enhet.py för att se tillgängliga enheter)
-echo 3. Din mikrofon är ansluten och fungerar
+echo FEL: Transkriberingssystemet startade inte korrekt.
+echo.
+echo Kontrollera följande:
+echo 1. .env-filen finns och innehåller giltig HF_AUTH_TOKEN
+echo 2. Alla beroenden är installerade (kör fix_dependencies.bat vid behov)
+echo 3. Ljudenhet/mikrofon är korrekt vald och ansluten (kör hitta_enhet.py)
+echo 4. Eventuella felmeddelanden ovan
 echo.
 pause
+exit /b 1

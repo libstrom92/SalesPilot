@@ -1,28 +1,22 @@
 import logging
 import os
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 import coloredlogs
 
 def setup_logging(name="VoiceTranscriber", level=logging.INFO):
     """Setup logging configuration with both file and console output"""
     
-    # Create logs directory if it doesn't exist
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
-    
-    # Create logger
+
     logger = logging.getLogger(name)
     logger.setLevel(level)
-    
-    # Clear any existing handlers
     logger.handlers = []
-    
-    # File handler with rotation
-    file_handler = RotatingFileHandler(
+
+    # En enkel FileHandler utan rotation
+    file_handler = logging.FileHandler(
         log_dir / "transcription.log",
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=5,
+        mode='a',
         encoding='utf-8'
     )
     file_handler.setLevel(level)
@@ -32,8 +26,7 @@ def setup_logging(name="VoiceTranscriber", level=logging.INFO):
     )
     file_handler.setFormatter(file_formatter)
     logger.addHandler(file_handler)
-    
-    # Console handler with colors
+
     coloredlogs.install(
         level=level,
         logger=logger,
@@ -52,9 +45,5 @@ def setup_logging(name="VoiceTranscriber", level=logging.INFO):
             'critical': {'color': 'red', 'bold': True}
         }
     )
-    
-    return logger
 
-def get_logger(name="VoiceTranscriber"):
-    """Get or create a logger with the specified name"""
-    return logging.getLogger(name)
+    return logger

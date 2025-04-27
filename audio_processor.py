@@ -35,9 +35,20 @@ class AudioProcessor:
     def __init__(self, config: Dict[str, Any]):
         self.logger = setup_logging("AudioProcessor")
         self.config = config
+        self.min_segment_length = 0.5  # Minimum length in seconds
+        self.buffer = np.array([])  # Audio buffer for accumulating short segments
         self.sample_rate = config.get("sample_rate", int(os.getenv("SAMPLE_RATE", 16000)))
-        self.whisper_model = config.get("whisper_model", os.getenv("WHISPER_MODEL", "small"))
-        self.compute_type = config.get("compute_type", os.getenv("COMPUTE_TYPE", "int8"))
+        self.whisper_model = (
+            config.get("whisper_model") or
+            config.get("model", {}).get("size") or
+            "large-v2"
+        )
+        self.compute_type = (
+            config.get("compute_type") or
+            config.get("model", {}).get("compute_type") or
+            "int8"
+        )
+        # Ta bort float16 helt, använd int8 som standard
         self.device = config.get("device", "cuda" if torch.cuda.is_available() else "cpu")
         self.hf_token = os.getenv("HF_AUTH_TOKEN", "").strip() or HFTokenManager.get_token()
         
@@ -120,9 +131,13 @@ class AudioProcessor:
             segments, _ = self.model.transcribe(
                 audio,
                 beam_size=5,
-                language=os.getenv("WHISPER_LANGUAGE", "sv"),
+                best_of=2,  # Added for slightly better accuracy
+                language=os.getenv("WHISPER_LANGUAGE", "sv"),  # Set default language to Swedish
                 task="transcribe",
-                vad_filter=False
+                condition_on_previous_text=True,  # Enable context awareness
+                vad_filter=True,  # Enable VAD
+                # vad_segments=True,  # (BORTTAGET: stöds ej i denna version)
+                no_speech_threshold=0.05  # Lower threshold for detecting speech
             )
             segments = list(segments)
             
@@ -139,25 +154,114 @@ class AudioProcessor:
             raise TranscriptionError(f"Could not transcribe audio: {e}")
 
     def process_streaming(self, audio_chunk: np.ndarray) -> str:
-        """Process a small audio chunk for streaming transcription"""
+        """Process a small audio chunk for streaming transcription with detailed logging."""
         try:
-            # Simple preprocessing (minimal to reduce latency)
-            audio_float = audio_chunk.astype(np.float32)
+            # Filter out silent audio segments before processing
+            if np.abs(audio_chunk).max() < 0.001:
+                self.logger.debug("Skipping silent audio segment")
+                return ""
+
+            # Add new chunk to buffer
+            self.logger.debug(f"Received audio chunk of size: {len(audio_chunk)}")
+            self.buffer = np.concatenate([self.buffer, audio_chunk]) if self.buffer.size else audio_chunk
+
+            # Add logging for audio levels in dBFS
+            rms = np.sqrt(np.mean(np.square(audio_chunk)))
+            dbfs = 20 * np.log10(rms) if rms > 0 else -float('inf')
+            self.logger.debug(f"Ljudnivå (dBFS): {dbfs:.2f}")
+
+            # Check if buffer is long enough
+            min_samples = int(self.min_segment_length * self.sample_rate)
+            if len(self.buffer) < min_samples:
+                self.logger.debug(f"Buffer too short ({len(self.buffer)} samples), waiting for more audio...")
+                return ""  # Buffer too short, wait for more audio
+
+            # Process buffer
+            audio_float = self.buffer.astype(np.float32)
             audio_float = audio_float / (np.max(np.abs(audio_float)) + 1e-7)
-            
+
+            # Clear buffer after processing
+            self.buffer = np.array([])
+
             # Use faster settings for streaming
+            self.logger.debug("Processing audio buffer for transcription...")
             segments, _ = self.model.transcribe(
                 audio_float,
-                beam_size=1,  # Reduced beam size
-                language=os.getenv("WHISPER_LANGUAGE", "sv"),
+                beam_size=1,  # Reduced beam size for faster processing
+                best_of=1,  # Simplified for real-time performance
+                language=os.getenv("WHISPER_LANGUAGE", "sv"),  # Set default language to Swedish
                 task="transcribe",
-                vad_filter=True  # Enable VAD to skip silence
+                condition_on_previous_text=False,  # Disable context awareness for speed
+                vad_filter=True,  # Enable VAD
+                no_speech_threshold=0.1  # Lower threshold for detecting speech
             )
-            
-            # Return just the text
-            return " ".join([s.text for s in segments])
+
+            # Log transcription result
+            if segments:
+                transcription = " ".join([s.text for s in segments])
+                self.logger.info(f"Generated transcription: {transcription}")
+                return transcription
+            else:
+                self.logger.debug("No transcription generated for the current audio buffer.")
+                return ""
         except Exception as e:
             self.logger.error(f"Streaming transcription error: {e}")
+            return ""
+
+    def process_streaming_with_context(self, audio_chunk: np.ndarray, previous_context: str = "") -> str:
+        """Process a small audio chunk for streaming transcription with context awareness."""
+        try:
+            # Filter out silent audio segments before processing
+            if np.abs(audio_chunk).max() < 0.001:
+                self.logger.debug("Skipping silent audio segment")
+                return ""
+
+            # Add new chunk to buffer
+            self.logger.debug(f"Received audio chunk of size: {len(audio_chunk)}")
+            self.buffer = np.concatenate([self.buffer, audio_chunk]) if self.buffer.size else audio_chunk
+
+            # Add logging for audio levels in dBFS
+            rms = np.sqrt(np.mean(np.square(audio_chunk)))
+            dbfs = 20 * np.log10(rms) if rms > 0 else -float('inf')
+            self.logger.debug(f"Ljudnivå (dBFS): {dbfs:.2f}")
+
+            # Check if buffer is long enough
+            min_samples = int(self.min_segment_length * self.sample_rate)
+            if len(self.buffer) < min_samples:
+                self.logger.debug(f"Buffer too short ({len(self.buffer)} samples), waiting for more audio...")
+                return ""  # Buffer too short, wait for more audio
+
+            # Process buffer
+            audio_float = self.buffer.astype(np.float32)
+            audio_float = audio_float / (np.max(np.abs(audio_float)) + 1e-7)
+
+            # Clear buffer after processing
+            self.buffer = np.array([])
+
+            # Use context-aware settings for streaming
+            self.logger.debug("Processing audio buffer with context for transcription...")
+            segments, _ = self.model.transcribe(
+                audio_float,
+                beam_size=3,  # Slightly higher beam size for better accuracy
+                best_of=2,  # Balance between speed and quality
+                language=os.getenv("WHISPER_LANGUAGE", "sv"),  # Set default language to Swedish
+                task="transcribe",
+                condition_on_previous_text=True,  # Enable context awareness
+                initial_prompt=previous_context,  # Use previous context
+                vad_filter=True,  # Enable VAD
+                no_speech_threshold=0.1  # Lower threshold for detecting speech
+            )
+
+            # Log transcription result
+            if segments:
+                transcription = " ".join([s.text for s in segments])
+                self.logger.info(f"Generated transcription with context: {transcription}")
+                return transcription
+            else:
+                self.logger.debug("No transcription generated for the current audio buffer.")
+                return ""
+        except Exception as e:
+            self.logger.error(f"Streaming transcription with context error: {e}")
             return ""
 
     def _identify_speakers(self, audio: np.ndarray) -> Dict[str, Any]:
@@ -189,41 +293,34 @@ class AudioProcessor:
             raise DiarizationError(f"Could not identify speakers: {e}")
 
     def process_audio(self, audio_array: np.ndarray) -> Tuple[str, str, Dict[str, Any]]:
-        """Process audio through the complete pipeline with error handling"""
-        MAX_AUDIO_LENGTH = 15 * self.sample_rate  # Reduced from 30 to 15 seconds
-        if len(audio_array) > MAX_AUDIO_LENGTH:
-            audio_array = audio_array[:MAX_AUDIO_LENGTH]
-            self.logger.warning("Audio clip truncated to 30 seconds")
-
+        """Process audio through the complete pipeline with error handling and improved diarization"""
+        # Ta bort trunkering, processa hela ljudet
         try:
-            # Preprocess audio
             preprocessed = self._preprocess_audio(audio_array)
-            
-            # Skip diarization if audio is short (for faster processing of short segments)
-            if len(audio_array) < 2 * self.sample_rate:  # Less than 2 seconds
-                # Skip diarization for very short clips
-                transcription = self._transcribe_audio(preprocessed)
-                self.logger.debug("Using quick mode for short audio clip")
-                return transcription, transcription, {"quick_mode": True}
-                
-            self.logger.debug("Preprocessing complete")
 
-            # Transcribe
+            # --- Förbättrad diarizering: segmentera ljudet ---
+            segment_len = 10 * self.sample_rate  # 10 sekunder
+            overlap = 2 * self.sample_rate       # 2 sekunder överlapp
+            diarization_results = []
+            for start in range(0, len(preprocessed), segment_len - overlap):
+                end = min(start + segment_len, len(preprocessed))
+                segment = preprocessed[start:end]
+                if len(segment) < 2 * self.sample_rate:
+                    continue  # hoppa över för korta segment
+                try:
+                    diarization = self._identify_speakers(segment)
+                    diarization_results.append(diarization)
+                except Exception as e:
+                    self.logger.warning(f"Diarization failed for segment {start}-{end}: {e}")
+
+            # Slå ihop diarization-resultat (enkel union, kan förbättras)
+            diarization_summary = {'segments': [d for d in diarization_results if d]}
+
+            # Transkribera hela klippet
             transcription = self._transcribe_audio(preprocessed)
-            self.logger.debug("Transcription complete")
-
-            # Diarize
-            diarization = self._identify_speakers(preprocessed)
-            self.logger.debug("Speaker diarization complete")
-
-            # Generate summary
             summary = self._generate_summary(preprocessed)
-            self.logger.debug("Summary generated")
-
-            # Update conversation history
             self._update_conversation(transcription)
-            
-            return transcription, summary, diarization  # Return the raw diarization object
+            return transcription, summary, diarization_summary
 
         except (TranscriptionError, DiarizationError) as e:
             self.logger.error(f"Processing error: {e}")
@@ -290,7 +387,7 @@ class AudioProcessor:
             import json
             from datetime import datetime
             
-            os.makedirs('conversation_logs', exist_ok=True)
+            os.makedirs('conversation_logs', exist_okay=True)
             
             filename = f"conversation_logs/conversation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             
@@ -304,7 +401,11 @@ class AudioProcessor:
             self.logger.error(f"Error saving conversation history: {e}")
 
             # Use the same tokenizer initialized in the constructor to analyze text
-        """Analyze text using the model"""
+        """Analyze text using the model
+
+        Returns:
+            str: The generated response from the model.
+        """
         try:
             # Använd samma modell som för transkription för att analysera text
             prompt = "Provide a valid prompt here"  # Define the prompt variable
@@ -323,11 +424,63 @@ class AudioProcessor:
             
             # Avkoda svaret
             response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            return response
+            return response # type: ignore
             
         except Exception as e:
             logger.error(f"Error in text analysis: {e}")
             raise AudioProcessingError(f"Could not analyze text: {str(e)}")
+
+    def process_realtime(self, audio_stream: np.ndarray, segment_seconds: int = 5) -> str:
+        """Transkriberar inkommande ljud i realtid, segment för segment (ingen diarizering)."""
+        segment_len = segment_seconds * self.sample_rate
+        results = []
+        for start in range(0, len(audio_stream), segment_len):
+            end = min(start + segment_len, len(audio_stream))
+            segment = audio_stream[start:end]
+            if len(segment) < int(0.5 * self.sample_rate):
+                continue  # hoppa över för korta segment
+            try:
+                # Snabb transkribering, ingen diarizering
+                text = self._transcribe_audio_realtime(segment)
+                if text.strip():
+                    results.append(text.strip())
+            except Exception as e:
+                self.logger.warning(f"Realtime transcription failed for segment {start}-{end}: {e}")
+        return " ".join(results)
+
+    def _transcribe_audio_realtime(self, audio: np.ndarray) -> str:
+        """Snabb transkribering för realtid (beam_size=1, best_of=1, ingen context)."""
+        try:
+            if len(audio.shape) > 1:
+                audio = np.mean(audio, axis=1)
+            segments, _ = self.model.transcribe(
+                audio,
+                beam_size=1,
+                best_of=1,
+                language=os.getenv("WHISPER_LANGUAGE", "sv"),
+                task="transcribe",
+                condition_on_previous_text=False,
+                vad_filter=True,
+                no_speech_threshold=0.1
+            )
+            segments = list(segments)
+            if not segments:
+                return ""
+            return " ".join([s.text for s in segments])
+        except Exception as e:
+            self.logger.error(f"Realtime transcription error: {e}")
+            return ""
+
+    def retroactive_diarization(self, audio_array: np.ndarray) -> Dict[str, Any]:
+        """Kör diarizering på hela ljudet retroaktivt efter samtalet."""
+        preprocessed = self._preprocess_audio(audio_array)
+        try:
+            diarization = self._identify_speakers(preprocessed)
+            self.logger.info("Retroaktiv diarizering klar.")
+            return diarization
+        except Exception as e:
+            self.logger.error(f"Retroaktiv diarizering misslyckades: {e}")
+            return {"error": str(e)}
 
 # Initialize logger for module-level logs
 logger = setup_logging("audio_processor")

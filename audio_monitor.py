@@ -21,14 +21,19 @@ class AudioLevelMonitor:
         self.alert_cooldown = 5  # seconds between alerts
         
     def add_level(self, audio_data: np.ndarray) -> None:
-        """Add new audio level measurement"""
+        """Add new audio level measurement with detailed logging for diagnostics"""
         try:
             level = float(np.abs(audio_data).mean())
+            max_level = float(np.max(audio_data))
+            min_level = float(np.min(audio_data))
+
+            logger.debug(f"Audio block stats - Avg: {level:.5f}, Max: {max_level:.5f}, Min: {min_level:.5f}")
+
             with self.lock:
                 self.levels.append(level)
                 if len(self.levels) > self.window_size:
                     self.levels.pop(0)
-                    
+
             self._check_levels()
         except Exception as e:
             logger.error(f"Fel vid nivåmätning: {e}")

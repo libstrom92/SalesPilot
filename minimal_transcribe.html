@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minimal Transkribering</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        .transcription {
+            margin-top: 20px;
+            padding: 10px;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            min-height: 200px;
+            overflow-y: auto;
+        }
+
+        button {
+            padding: 10px 20px;
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .status {
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Transkribering i Realtid</h1>
+        <button id="startButton">Starta Transkribering</button>
+        <button id="stopButton" disabled>Stoppa Transkribering</button>
+        <div class="status" id="status">Status: Redo</div>
+        <div class="transcription" id="transcription">Här visas transkriptioner...</div>
+    </div>
+
+    <script>
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const statusDiv = document.getElementById('status');
+        const transcriptionDiv = document.getElementById('transcription');
+        let websocket;
+        let isConnected = false;
+
+        function connectWebSocket() {
+            if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                websocket = new WebSocket('ws://localhost:9091');
+
+                websocket.onopen = () => {
+                    isConnected = true;
+                    statusDiv.textContent = 'Status: Ansluten';
+                    startButton.disabled = false;
+                    stopButton.disabled = true;
+                    console.log('WebSocket anslutning öppnad');
+                };
+
+                websocket.onmessage = (event) => {
+                    console.log('Mottaget meddelande:', event.data);
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'transcription' && data.text) {
+                        const p = document.createElement('p');
+                        p.textContent = data.text;
+                        transcriptionDiv.appendChild(p);
+                        transcriptionDiv.scrollTop = transcriptionDiv.scrollHeight;
+                        console.log('Visar transkription:', data.text);
+                    } else {
+                        console.log('Okänt meddelande format:', data);
+                    }
+                };
+
+                websocket.onclose = () => {
+                    statusDiv.textContent = 'Status: Frånkopplad';
+                    startButton.disabled = true;
+                    stopButton.disabled = true;
+                    isConnected = false;
+                    console.log('WebSocket anslutning stängd');
+                };
+
+                websocket.onerror = () => {
+                    statusDiv.textContent = 'Status: Fel vid anslutning';
+                    console.error('WebSocket fel inträffade');
+                };
+            }
+        }
+
+        startButton.addEventListener('click', () => {
+            if (!isConnected) {
+                connectWebSocket();
+            } else {
+                websocket.send(JSON.stringify({ command: 'start' }));
+                statusDiv.textContent = 'Status: Transkribering pågår...';
+                startButton.disabled = true;
+                stopButton.disabled = false;
+            }
+        });
+
+        stopButton.addEventListener('click', () => {
+            if (isConnected) {
+                websocket.send(JSON.stringify({ command: 'stop' }));
+                statusDiv.textContent = 'Status: Transkribering stoppad';
+                startButton.disabled = false;
+                stopButton.disabled = true;
+            }
+        });
+    </script>
+</body>
+</html>

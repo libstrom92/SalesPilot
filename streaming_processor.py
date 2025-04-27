@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional, List, Tuple
 import time
 import queue
 import threading
+import sounddevice as sd  # Import library for audio playback
 
 logger = setup_logging("StreamingProcessor")
 
@@ -16,11 +17,42 @@ class StreamingProcessor:
     def __init__(self, config: Dict[str, Any]):
         self.logger = logger
         self.config = config
-        self.sample_rate = config.get("sample_rate", int(os.getenv("SAMPLE_RATE", 16000)))
-        self.whisper_model = os.getenv("WHISPER_MODEL", "small")  # Use smaller model for streaming
-        self.compute_type = os.getenv("COMPUTE_TYPE", "int8")  # Use int8 for faster processing
+        self.sample_rate = 48000  # Ensure 48 kHz sample rate
+        self.whisper_model = (
+            config.get("whisper_model") or
+            config.get("model", {}).get("size") or
+            "large-v2"
+        )
+        self.compute_type = (
+            config.get("compute_type") or
+            config.get("model", {}).get("compute_type") or
+            "float16"
+        )
         
-        self.buffer_size = 4096  # Reduced buffer size for lower latency
+        # Svenska språkinställningar
+        self.language = os.getenv("WHISPER_LANGUAGE", "sv")
+        self.logger.info(f"Använder språk: {self.language}")
+        
+        # Domänspecifik kontext för transkription
+        self.initial_prompt = os.getenv("WHISPER_PROMPT", 
+            "Detta är en transkription av ett samtal inom försäljning, teknik och affärer på svenska. "
+            "Tekniktermer, säljtermer och branschspråk bör transkriberas korrekt.")
+        self.logger.info("Domänspecifik prompt aktiverad för optimerad transkription")
+        
+        self.buffer_size = 16384  # Increased buffer size for better handling of audio chunks
+        self.min_audio_length = 0.25  # Reduced from 0.5 to 0.25 seconds
+        self.silence_threshold = 0.005  # Sänkt från 0.01 till 0.005 för att vara mer känslig
+        self.max_queue_size = 10  # Limit the processing queue size to prevent overflows
+
+        # Debug: Log initialization details
+        self.logger.debug(f"Sample rate: {self.sample_rate}, Buffer size: {self.buffer_size}, Max queue size: {self.max_queue_size}")
+        self.logger.debug(f"Whisper model: {self.whisper_model}, Compute type: {self.compute_type}")
+
+        # Debug: Log language and prompt settings
+        self.logger.debug(f"Language: {self.language}, Initial prompt: {self.initial_prompt}")
+
+        # Initialize a semaphore to control queue size
+        self.queue_semaphore = threading.Semaphore(self.max_queue_size)
         
         # Initialize model with optimized settings
         try:
@@ -28,7 +60,7 @@ class StreamingProcessor:
             self.model = WhisperModel(
                 self.whisper_model,
                 device=config.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
-                compute_type=self.compute_type,
+                compute_type="int8",  # Force int8 for faster processing
                 download_root=os.path.join(os.path.dirname(__file__), "models")
             )
             self.logger.info("✅ Streaming model initialized")
@@ -39,7 +71,7 @@ class StreamingProcessor:
         # Buffer for accumulating audio
         self.audio_buffer = []
         self.buffer_lock = threading.Lock()
-        self.max_buffer_size = 5 * self.sample_rate  # 5 seconds max
+        self.max_buffer_size = 2 * self.sample_rate  # Reduced to 2 seconds for faster processing
         
         # Processing queue and thread
         self.processing_queue = queue.Queue()
@@ -48,16 +80,36 @@ class StreamingProcessor:
         self.processing_thread.daemon = True
         self.processing_thread.start()
         
+        # Debug: Print model settings
+        self.logger.info(f"Model settings: language={self.language}, model={self.whisper_model}, min_audio={self.min_audio_length}s")
+        self.logger.info(f"VAD disabled for debugging")
+        
+        # Implement fallback mechanism for dropped buffers
+        self.dropped_buffers = []  # Store dropped buffers for retry
+        
     def add_audio_chunk(self, chunk: np.ndarray) -> None:
-        """Add a chunk of audio to the buffer"""
+        """Add a chunk of audio to the buffer and play it back for verification"""
         with self.buffer_lock:
             self.audio_buffer.append(chunk.copy())
-            
+
+            # Debug: Log audio chunk details
+            self.logger.debug(f"Audio chunk received with shape: {chunk.shape}, dtype: {chunk.dtype}")
+
+            # Play the audio chunk for verification
+            try:
+                sd.play(chunk, samplerate=self.sample_rate)
+                sd.wait()  # Wait until playback is finished
+                self.logger.info("Audio chunk played back successfully.")
+            except Exception as e:
+                self.logger.error(f"Error during audio playback: {e}")
+
             # Calculate total buffer length
-            total_samples = sum(len(c) for c in self.audio_buffer)
-            
-            # If buffer exceeds max size, process it
+            total_samples = sum(len(chunk) for chunk in self.audio_buffer)
+            self.logger.debug(f"Total buffer length after appending: {total_samples} samples")
+
+            # Debug: Log buffer processing trigger
             if total_samples > self.max_buffer_size:
+                self.logger.debug("Buffer size exceeded max limit, triggering processing")
                 self._process_buffer()
                 
     def set_result_callback(self, callback) -> None:
@@ -76,22 +128,43 @@ class StreamingProcessor:
             # Clear buffer
             self.audio_buffer = []
             
-        # Add to processing queue
-        self.processing_queue.put(audio_data)
+        # Add to processing queue if space is available
+        if self.queue_semaphore.acquire(blocking=False):
+            self.processing_queue.put(audio_data)
+        else:
+            self.logger.warning("Processing queue is full, storing buffer for retry")
+            self.dropped_buffers.append(audio_data)  # Store dropped buffer
+        
+    def _retry_dropped_buffers(self):
+        """Retry processing dropped buffers"""
+        while self.dropped_buffers:
+            buffer = self.dropped_buffers.pop(0)
+            if self.queue_semaphore.acquire(blocking=False):
+                self.processing_queue.put(buffer)
+            else:
+                self.logger.warning("Retry failed, re-storing buffer")
+                self.dropped_buffers.insert(0, buffer)
+                break
         
     def _processing_loop(self) -> None:
         """Background thread for processing audio"""
         while True:
             try:
-                # Get audio from queue
+                # Retry dropped buffers
+                self._retry_dropped_buffers()
+
+                # Measure queue retrieval time
+                start_queue = time.time()
                 audio_data = self.processing_queue.get(timeout=1)
+                self.queue_semaphore.release()  # Release semaphore when processing starts
+                logger.debug(f"Queue retrieval took: {time.time() - start_queue:.4f} seconds")
                 
                 # Process audio
-                start_time = time.time()
+                start_transcription = time.time()
                 result = self._transcribe_chunk(audio_data)
-                processing_time = time.time() - start_time
+                logger.debug(f"Transcription took: {time.time() - start_transcription:.4f} seconds")
                 
-                self.logger.debug(f"Processed chunk in {processing_time:.2f}s")
+                self.logger.debug(f"Processed chunk in {time.time() - start_transcription:.2f}s")
                 
                 # Send result via callback
                 if self.result_callback and result:
@@ -107,27 +180,38 @@ class StreamingProcessor:
     def _transcribe_chunk(self, audio: np.ndarray) -> str:
         """Transcribe audio chunk with optimized settings"""
         try:
+            # Skip processing if audio is too quiet
+            if np.abs(audio).max() < 0.01:
+                return ""
+                
             # Normalize audio
             audio_float = audio.astype(np.float32)
             max_val = np.max(np.abs(audio_float))
             audio_float = audio_float / (max_val if max_val > 0 else 1.0)
             self.logger.debug(f"Normalized audio chunk with shape: {audio_float.shape}")
             
-            # Use optimized transcription settings
+            # Debug: Log audio data before processing
+            self.logger.debug(f"Processing audio data with shape: {audio.shape}, dtype: {audio.dtype}")
+
+            # Use optimized transcription settings for svenska
             segments, _ = self.model.transcribe(
                 audio_float,
-                beam_size=1,  # Reduced beam size
-                language=os.getenv("WHISPER_LANGUAGE", "sv"),
+                beam_size=2,  # Slightly increase beam size for better accuracy
+                language=self.language,
                 task="transcribe",
-                vad_filter=True,  # Enable VAD to skip silence
-                initial_prompt=None,  # No prompt for faster processing
-                word_timestamps=False  # Disable word timestamps
+                vad_filter=True,  # Endast röstsegment
+                initial_prompt=self.initial_prompt,
+                word_timestamps=False
             )
             self.logger.debug(f"Transcription produced {len(list(segments))} segments")
             
             # Collect text
-            text = " ".join([s.text for s in segments])
+            text = " ".join([s.text for s in segments if s.text.strip()])
             self.logger.debug(f"Final transcribed text: '{text}'")
+            
+            # Debug: Log transcription result
+            self.logger.debug(f"Generated transcription: {text}")
+
             return text.strip()
             
         except Exception as e:
@@ -137,48 +221,66 @@ class StreamingProcessor:
     def process_streaming(self, audio_chunk: np.ndarray) -> str:
         """Process a small audio chunk for streaming transcription"""
         try:
-            # Logga inkommande ljuddata
-            self.logger.debug(f"Received audio chunk: shape={audio_chunk.shape}, dtype={audio_chunk.dtype}, min={audio_chunk.min()}, max={audio_chunk.max()}")
-            
-            # Kontrollera om ljudet innehåller data
-            if np.all(audio_chunk == 0) or np.abs(audio_chunk).max() < 0.001:
-                self.logger.warning("Audio chunk contains no significant data (silence or zeros)")
+            # Log some audio samples for debugging
+            if len(audio_chunk) > 0:
+                sample_view = audio_chunk[:min(100, len(audio_chunk))]
+                self.logger.debug(f"First few samples: min={np.min(sample_view):.4f}, max={np.max(sample_view):.4f}, mean={np.mean(np.abs(sample_view)):.4f}")
+                
+                # Check if we have any non-zero values (real audio)
+                if np.count_nonzero(sample_view) == 0:
+                    self.logger.warning("Audio contains only zeros! Check audio source.")
+                
+            # Check if audio chunk is too short
+            if len(audio_chunk) < int(self.sample_rate * self.min_audio_length):
+                self.logger.debug(f"Audio chunk too short ({len(audio_chunk)} samples < {int(self.sample_rate * self.min_audio_length)}), buffering...")
                 return ""
                 
-            # Normalisera ljudet
+            # Skip processing if audio is too quiet
+            max_val = np.abs(audio_chunk).max()
+            self.logger.debug(f"Audio max level: {max_val:.4f}, Silence threshold: {self.silence_threshold}")
+            if max_val < self.silence_threshold:
+                self.logger.debug(f"Audio too quiet ({max_val:.4f} < {self.silence_threshold})")
+                return ""
+                
+            # Normalize audio and convert to float32
             audio_float = audio_chunk.astype(np.float32)
-            max_val = np.max(np.abs(audio_float))
+            max_val = np.abs(audio_float).max()
             audio_float = audio_float / (max_val if max_val > 0 else 1.0)
-            self.logger.debug(f"Normalized audio chunk with shape: {audio_float.shape}")
+            self.logger.info(f"Processing audio chunk: shape={audio_float.shape}, duration={len(audio_float)/self.sample_rate:.2f}s")
             
-            # Mät tiden för transkriberingen
+            # Measure the time for the transcription
             start_time = time.time()
             
-            # Transkribera
+            # Transcribe med svenska optimering - VAD DISABLED for debugging
             segments, info = self.model.transcribe(
                 audio_float,
-                beam_size=1,
-                language=os.getenv("WHISPER_LANGUAGE", "sv"),
+                beam_size=5,            # Increased for better accuracy
+                language=self.language,
                 task="transcribe",
-                vad_filter=True
+                vad_filter=True,  # Endast röstsegment
+                initial_prompt=self.initial_prompt,
+                condition_on_previous_text=True,
+                no_speech_threshold=0.6,  # Mycket högre tolerans (default 0.6)
+                compression_ratio_threshold=2.4  # Högre tolerans (default 2.4)
             )
             
-            # Konvertera segment-iterator till lista för att kunna använda den flera gånger
+            # Convert segment iterator to list to use it multiple times
             segment_list = list(segments)
             processing_time = time.time() - start_time
             
-            self.logger.debug(f"Transcription completed in {processing_time:.2f}s: {len(segment_list)} segments detected")
+            self.logger.info(f"Transcription completed in {processing_time:.2f}s: {len(segment_list)} segments detected")
             
-            # Ingen text returnerades
+            # No text was returned
             if len(segment_list) == 0:
-                self.logger.warning("No segments detected in audio - might be silence or filtered by VAD")
+                self.logger.warning("No segments detected in audio - might be silence or filtered")
                 return ""
             
-            # Samla ihop texten
-            text = " ".join([s.text for s in segment_list])
+            # Collect the text
+            text = " ".join([s.text for s in segment_list if s.text.strip()])
             
             if text.strip():
-                self.logger.debug(f"Transcribed text: '{text}'")
+                self.logger.info(f"🎯 Got transcription segments: {len(segment_list)}")
+                self.logger.info(f"✨ Transcribed text: '{text}'")
             else:
                 self.logger.warning("Empty text returned after transcription")
             
@@ -208,3 +310,16 @@ class StreamingProcessor:
             
         # Process directly
         return self._transcribe_chunk(audio_data)
+        
+    # Metod för att träna en anpassad modell (framtida implementering)
+    def fine_tune_model(self, training_data_path: str, domain: str = "sälj_teknik"):
+        """
+        Förbereder för finjustering av Whisper-modellen för specifik domän
+        Notera: Denna metod är en plats för framtida implementering
+        
+        Args:
+            training_data_path: Sökväg till träningsdata (ljud + transkriptioner)
+            domain: Vilken domän modellen ska optimeras för (t.ex. "sälj", "teknik")
+        """
+        self.logger.info(f"Fine-tuning för domän {domain} planerad (framtida funktion)")
+        # TODO: Implementera finjustering med HuggingFace eller liknande

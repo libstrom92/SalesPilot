@@ -102,3 +102,17 @@ Om du upplever problem:
 - Samtalshistorik sparas i `conversation_logs/`
 - Enhetstester finns tillgängliga i test_audio_processor.py
 - Kör tester med `run_tests.bat`
+
+## Future Considerations
+
+### Dynamic Whisper Model Adjustment
+- **Pros**:
+  - Allows flexibility to switch between performance and accuracy.
+  - Can be adjusted without modifying the code, making it user-friendly.
+- **Cons**:
+  - Requires additional configuration management.
+  - May introduce complexity in debugging if not properly documented.
+
+### Implementation Suggestion
+- Use a configuration file (e.g., `audio_config.json`) or an environment variable to specify the Whisper model size.
+- Ensure proper validation and fallback mechanisms in case of invalid configurations.
