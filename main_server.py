@@ -17,6 +17,7 @@ from typing import Set, Optional, Dict, List
 from pathlib import Path
 from queue import Queue
 import sys
+import socket
 
 from audio_processor import AudioProcessor, AudioProcessingError
 from config import load_config
@@ -54,6 +55,17 @@ TRANSCRIPTION_MODE = os.getenv("TRANSCRIPTION_MODE", "balanced")
 
 # Message queue for WebSocket communication
 message_queue = queue.Queue(maxsize=20)
+
+def find_free_port(start_port=9091, max_tries=10):
+    port = start_port
+    for _ in range(max_tries):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(('localhost', port))
+                return port
+            except OSError:
+                port += 1
+    raise RuntimeError("No free port found in range.")
 
 # === FRAMEWORK MANAGEMENT ===
 class FrameworkManager:
@@ -136,7 +148,7 @@ class ProcessingThread(threading.Thread):
                 samplerate=SAMPLE_RATE,
                 channels=CHANNELS,
                 device=self.device_id,
-                callback=self.audio_callback
+                callback=self.audio_callback  # OBS: nu vanlig funktion
             )
             self.stream.start()
             logger.info("Voicemeeter B1 monitoring started successfully.")
@@ -164,8 +176,8 @@ class ProcessingThread(threading.Thread):
                 logger.error(f"Error stopping Voicemeeter B1 stream: {e}")
         self.running = False
 
-    async def audio_callback(self, indata, frames, time_info, status):
-        """Callback to handle incoming audio data from Voicemeeter B1."""
+    def audio_callback(self, indata, frames, time_info, status):
+        """Callback to handle incoming audio data from Voicemeeter B1 (SYNKRON)."""
         current_time = time.time()
         
         # Debug: Log audio capture details
@@ -202,7 +214,7 @@ class ProcessingThread(threading.Thread):
             
             try:
                 if not self.audio_queue.full():
-                    await self.audio_queue.put(indata.copy())
+                    self.audio_queue.put(indata.copy())  # INGEN await här!
                 else:
                     logger.warning("Audio queue full, dropping frame")
             except queue.Full:
@@ -313,6 +325,11 @@ class ProcessingThread(threading.Thread):
 # === WEBSOCKET HANDLER ===
 active_connections: Set[WebSocketServerProtocol] = set()
 
+# === GLOBAL STATE ===
+server_running = False
+transcription_running = False
+processing_thread: Optional[ProcessingThread] = None
+
 # Process outgoing messages in the main asyncio loop
 async def process_messages():
     """Process outgoing WebSocket messages from the queue"""
@@ -361,57 +378,71 @@ async def process_messages():
             await asyncio.sleep(1)  # Wait a bit longer on error
 
 async def handle_websocket(websocket: WebSocketServerProtocol):
-    """Handle WebSocket connection and commands for audio processing"""
+    global server_running, transcription_running, processing_thread
     try:
         active_connections.add(websocket)
         logger.info("Ny WebSocket-anslutning etablerad")
-        
-        # Send test message
-        test_message = {
-            "type": "transcription",
-            "text": "Testmeddelande: WebSocket-anslutning etablerad",
+        await websocket.send(json.dumps({
+            "type": "status",
+            "status": "connected",
             "timestamp": time.time()
-        }
-        await websocket.send(json.dumps(test_message))
-        
-        recording_thread = ProcessingThread(websocket)
-        recording_thread.start()  # Start the processing thread
+        }))
 
         async for message in websocket:
             try:
                 data = json.loads(message)
             except json.JSONDecodeError:
                 logger.error("Invalid JSON received")
+                await websocket.send(json.dumps({"type": "error", "error": "Invalid JSON"}))
                 continue
 
-            if data.get('command') == 'start':
-                logger.info("Received 'start' command from client")
-                await websocket.send(json.dumps({"status": "starting", "timestamp": time.time()}))
-                if not recording_thread.running:
-                    recording_thread.start_recording()
-                    
-                    # Send initial status information
-                    await websocket.send(json.dumps({
-                        "status": "recording_started",
-                        "timestamp": time.time()}))
-                    
-                    # Send a test message to verify WebSocket communication
-                    logger.info("Sending test transcription message to client")
-                    await websocket.send(json.dumps({
-                        "type": "transcription", 
-                        "text": "Server connected. Testing WebSocket communication.",
-                        "timestamp": time.time()
-                    }))
+            cmd = data.get('command')
+            if cmd == 'start_server':
+                if not server_running:
+                    server_running = True
+                    await websocket.send(json.dumps({"type": "status", "status": "server_started", "timestamp": time.time()}))
+                else:
+                    await websocket.send(json.dumps({"type": "status", "status": "server_already_running", "timestamp": time.time()}))
 
-            elif data.get('command') == 'stop':
-                logger.info("Received 'stop' command from client.")
-                if recording_thread.running:
-                    recording_thread.stop_recording()
-                    recording_thread.running = False
-                    await websocket.send(json.dumps({"status": "recording_stopped"}))
+            elif cmd == 'stop_server':
+                if server_running:
+                    server_running = False
+                    transcription_running = False
+                    if processing_thread and processing_thread.running:
+                        processing_thread.stop_recording()
+                        processing_thread.running = False
+                    await websocket.send(json.dumps({"type": "status", "status": "server_stopped", "timestamp": time.time()}))
+                else:
+                    await websocket.send(json.dumps({"type": "status", "status": "server_already_stopped", "timestamp": time.time()}))
+
+            elif cmd == 'start_transcription':
+                if not transcription_running:
+                    transcription_running = True
+                    if not processing_thread or not processing_thread.running:
+                        processing_thread = ProcessingThread(websocket)
+                        processing_thread.start()
+                    else:
+                        processing_thread.websocket = websocket
+                    await websocket.send(json.dumps({"type": "status", "status": "transcription_started", "timestamp": time.time()}))
+                else:
+                    await websocket.send(json.dumps({"type": "status", "status": "transcription_already_running", "timestamp": time.time()}))
+
+            elif cmd == 'stop_transcription':
+                if transcription_running:
+                    transcription_running = False
+                    if processing_thread and processing_thread.running:
+                        processing_thread.stop_recording()
+                        processing_thread.running = False
+                    await websocket.send(json.dumps({"type": "status", "status": "transcription_stopped", "timestamp": time.time()}))
+                else:
+                    await websocket.send(json.dumps({"type": "status", "status": "transcription_already_stopped", "timestamp": time.time()}))
+
+            else:
+                await websocket.send(json.dumps({"type": "error", "error": f"Unknown command: {cmd}"}))
 
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
+        await websocket.send(json.dumps({"type": "error", "error": str(e)}))
     finally:
         active_connections.remove(websocket)
 
@@ -461,5 +492,21 @@ async def start_server(audio_processor=None, config=None):
         raise
 
 if __name__ == "__main__":
-    # If this script is run directly, start the server
-    asyncio.run(start_server())
+    try:
+        # Försök använda porten i config, annars hitta en ledig port
+        port_to_use = PORT
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('localhost', PORT))
+        except OSError:
+            logger.warning(f"Port {PORT} is in use, searching for a free port...")
+            port_to_use = find_free_port(PORT + 1)
+            logger.info(f"Using free port {port_to_use} instead.")
+        PORT = port_to_use  # Sätt globalt
+        # Skriv porten till fil för frontend
+        with open("websocket_port.txt", "w") as f:
+            f.write(str(PORT))
+        asyncio.run(start_server())
+    except Exception as e:
+        logger.error(f"Failed to start server: {e}")
+        print(f"Failed to start server: {e}")

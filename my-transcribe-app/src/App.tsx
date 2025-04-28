@@ -7,20 +7,35 @@ function App() {
   const [debug, setDebug] = useState<string[]>([]);
   const [showDebug, setShowDebug] = useState<boolean>(false);
   const ws = useRef<WebSocket | null>(null);
+  const [wsPort, setWsPort] = useState<number | null>(null);
 
+  // Hämta port från websocket_port.txt vid start
   useEffect(() => {
-    ws.current = new WebSocket("ws://localhost:8000");
+    fetch("/websocket_port.txt")
+      .then(res => res.text())
+      .then(portStr => {
+        const port = parseInt(portStr.trim(), 10);
+        if (!isNaN(port)) setWsPort(port);
+        else setLog(l => [...l, "Kunde inte läsa WebSocket-port från websocket_port.txt"]);
+      })
+      .catch(() => setLog(l => [...l, "Kunde inte läsa websocket_port.txt"]));
+  }, []);
+
+  // Initiera WebSocket när porten är känd
+  useEffect(() => {
+    if (!wsPort) return;
+    ws.current = new WebSocket(`ws://localhost:${wsPort}`);
     ws.current.onopen = () => {
       setLog((l) => [...l, "WebSocket ansluten"]);
       setStatus("Stoppad");
-      setDebug((d) => [...d, `[UI→WS] Anslutning öppnad`]);
+      setDebug((d) => [...d, `[UI->WS] Anslutning öppnad (port ${wsPort})`]);
     };
     ws.current.onerror = (error) => {
       setLog((l) => [...l, "WebSocket fel: " + JSON.stringify(error)]);
-      setDebug((d) => [...d, `[WS→UI] FEL: " + JSON.stringify(error)`]);
+      setDebug((d) => [...d, `[WS->UI] FEL: ${JSON.stringify(error)}`]);
     };
     ws.current.onmessage = (event) => {
-      setDebug((d) => [...d, `[WS→UI] Mottaget: " + event.data]);
+      setDebug((d) => [...d, `[WS->UI] Mottaget: ${event.data}`]);
       try {
         const data = JSON.parse(event.data);
         if (data.transcript) {
@@ -34,19 +49,19 @@ function App() {
         if (data.error) {
           setStatus("Fel");
           setLog((l) => [...l, "Fel: " + data.error]);
-          setDebug((d) => [...d, `[WS→UI] FEL: " + data.error]);
+          setDebug((d) => [...d, `[WS->UI] FEL: ${data.error}`]);
         }
       } catch (e) {
         setLog((l) => [...l, "Oväntat meddelande: " + event.data]);
-        setDebug((d) => [...d, `[WS→UI] FEL vid JSON.parse: " + event.data]);
+        setDebug((d) => [...d, `[WS->UI] FEL vid JSON.parse: ${event.data}`]);
       }
     };
     ws.current.onclose = () => {
       setLog((l) => [...l, "WebSocket stängd"]);
-      setDebug((d) => [...d, `[WS→UI] Anslutning stängd`]);
+      setDebug((d) => [...d, `[WS->UI] Anslutning stängd`]);
     };
     return () => ws.current?.close();
-  }, []);
+  }, [wsPort]);
 
   // Skicka kommando till backend
   const sendCommand = (command: string) => {
@@ -54,7 +69,7 @@ function App() {
       const msg = JSON.stringify({ command });
       ws.current.send(msg);
       setLog((l) => [...l, `Skickade kommando: ${command}`]);
-      setDebug((d) => [...d, `[UI→WS] Skickat: ${msg}`]);
+      setDebug((d) => [...d, `[UI->WS] Skickat: ${msg}`]);
     }
   };
 
