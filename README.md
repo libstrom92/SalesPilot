@@ -1,4 +1,16 @@
-# Transkriberingssystem – Projektöversikt
+# Realtids Transkribering & AI-analys
+
+## Arkitektur
+- `main_server.py`: WebSocket-server, ljudinmatning, transkribering, AI-analys
+- `streaming_processor.py`: Whisper/Faster-Whisper, domänprompt
+- `gpt_analyzer.py`: AI-feedback, block- och kontextanalys (GPT/HuggingFace)
+- `my-transcribe-app/`: React-UI, live-transkription, AI-paneler
+
+## Flöde
+1. Ljud → text (Whisper)
+2. Text → AI-feedback (Realtime, Block, Kontext)
+3. WebSocket → Frontend
+4. UI visar transkription, AI-insikter, logg/debug
 
 ## Starta hela systemet
 
@@ -40,6 +52,17 @@ Använd endast dessa om du felsöker eller vill köra delar av systemet separat.
 ## Vidareutveckling
 - Lägg till triggers, mallförslag eller användarstöd i React-appen.
 - Utöka backend för fler kommandon eller statusmeddelanden.
+- Lägg till dialektanalys, triggers, mallförslag
+- Integrera fler svenska modeller (Hugging Face)
+- Bygg ut UI-komponenter för CRM/affärsstöd
+
+## TODO
+- [ ] Lägg till dialektanalys i `gpt_analyzer.py`
+- [ ] Integrera Hugging Face-modeller för svenska
+- [ ] Skapa fler UI-komponenter för AI-insikter
+- [ ] Lägg till mallförslag och action-knappar i frontend
+- [ ] Förbättra dokumentation och kodkommentarer
+// step 0 done – next: kontrollera modulstruktur och kommentarer
 
 ---
 

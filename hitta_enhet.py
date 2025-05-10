@@ -42,6 +42,7 @@ def main():
         print(f"{Fore.CYAN}Recommended: Choose a device marked as ✓ Available{Style.RESET_ALL}")
 
     print(f"\n{Fore.YELLOW}To use a device, set AUDIO_DEVICE_ID in .env to the desired ID{Style.RESET_ALL}")
+    print(f"{Fore.GREEN}For your setup, set AUDIO_DEVICE_ID=2 in your .env file{Style.RESET_ALL}")
 
 if __name__ == "__main__":
     try:

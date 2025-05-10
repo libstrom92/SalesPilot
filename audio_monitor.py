@@ -43,20 +43,18 @@ class AudioLevelMonitor:
         current_time = time.time()
         if current_time - self.last_alert_time < self.alert_cooldown:
             return
-            
         try:
             with self.lock:
                 if not self.levels:
                     return
-                    
                 avg_level = np.mean(self.levels)
-                if avg_level < 0.01:  # Very low signal
+                logger.info(f"[LEVEL] Avg audio level: {avg_level:.5f}")
+                if avg_level < 0.005:  # Sänkt tröskel för låg signal
                     logger.warning("⚠️ Ljudnivån är mycket låg. Kontrollera mikrofonen.")
                     self.last_alert_time = current_time
                 elif avg_level > 0.8:  # Near clipping
                     logger.warning("⚠️ Ljudnivån är för hög. Risk för distorsion.")
                     self.last_alert_time = current_time
-                    
         except Exception as e:
             logger.error(f"Fel vid nivåkontroll: {e}")
     

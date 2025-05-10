@@ -90,3 +90,27 @@ class AudioNormalizer:
             return "✅ Optimal ljudnivå"
         else:
             return "⚠️ Justera källvolymen för bättre kvalitet"
+
+def normalize_audio_to_target(audio: np.ndarray, target_peak: float = 0.8) -> np.ndarray:
+    """Normalisera ljudet så att dess toppvärde når target_peak (t.ex. 0.8)."""
+    if not isinstance(audio, np.ndarray):
+        audio = np.array(audio)
+    peak = np.max(np.abs(audio))
+    if peak == 0:
+        return audio
+    return audio * (target_peak / peak)
+
+def simple_noise_gate(audio: np.ndarray, threshold: float = 0.01) -> np.ndarray:
+    """Nollställer alla sample under tröskeln (enkel noise gate för att ta bort whitenoise)."""
+    gated = np.where(np.abs(audio) < threshold, 0, audio)
+    return gated
+
+def soft_noise_gate(audio: np.ndarray, threshold: float = 0.01, ratio: float = 0.2) -> np.ndarray:
+    """Mjuk expander/gate: sänker volymen på svaga partier istället för att nollställa dem."""
+    gated = np.where(np.abs(audio) < threshold, audio * ratio, audio)
+    return gated
+
+# Exempelanvändning:
+# audio = soft_noise_gate(audio, threshold=0.003, ratio=0.2)
+# audio = normalize_audio_to_target(audio, target_peak=0.6)
+# audio = simple_noise_gate(audio, threshold=0.01)

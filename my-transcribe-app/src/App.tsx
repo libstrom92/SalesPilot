@@ -8,6 +8,9 @@ function App() {
   const [showDebug, setShowDebug] = useState<boolean>(false);
   const ws = useRef<WebSocket | null>(null);
   const [wsPort, setWsPort] = useState<number | null>(null);
+  const [aiFeedback, setAiFeedback] = useState<any>(null);
+  const [blockAnalysis, setBlockAnalysis] = useState<any>(null);
+  const [contextAnalysis, setContextAnalysis] = useState<any>(null);
 
   // Hämta port från websocket_port.txt vid start
   useEffect(() => {
@@ -38,9 +41,28 @@ function App() {
       setDebug((d) => [...d, `[WS->UI] Mottaget: ${event.data}`]);
       try {
         const data = JSON.parse(event.data);
+        if (data.type === 'pong') {
+          setLog((l) => [...l, `Pong från backend (${data.timestamp})`]);
+          setDebug((d) => [...d, `[WS->UI] Pong mottaget: ${JSON.stringify(data)}`]);
+        }
+        if (data.type === 'block_analysis') {
+          setBlockAnalysis(data.block_result);
+          setLog((l) => [...l, "Blockanalys mottagen"]);
+        }
+        if (data.type === 'context_analysis') {
+          setContextAnalysis(data.context_result);
+          setLog((l) => [...l, "Kontextanalys mottagen"]);
+        }
         if (data.transcript) {
           setTranscript((prev) => prev + data.transcript);
           setLog((l) => [...l, "Transkribering: " + data.transcript]);
+        } else if (data.text) {
+          setTranscript((prev) => prev + data.text);
+          setLog((l) => [...l, "Transkribering (text): " + data.text]);
+        }
+        if (data.ai_feedback) {
+          setAiFeedback(data.ai_feedback);
+          setLog((l) => [...l, "AI-feedback mottagen"]);
         }
         if (data.status) {
           setStatus(data.status);
@@ -73,6 +95,14 @@ function App() {
     }
   };
 
+  // Skicka ping och visa pong i loggen
+  const sendPing = () => {
+    if (ws.current && ws.current.readyState === 1) {
+      ws.current.send(JSON.stringify({ command: "ping" }));
+      setLog((l) => [...l, "Skickade ping till backend"]);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', maxWidth: 1100, margin: "2rem auto", fontFamily: "sans-serif", position: 'relative' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -82,13 +112,33 @@ function App() {
           <button onClick={() => sendCommand("stop_server")} style={{ marginLeft: 8 }}>Stoppa server</button>
           <button onClick={() => sendCommand("start_transcription")} style={{ marginLeft: 8 }}>Starta transkribering</button>
           <button onClick={() => sendCommand("stop_transcription")} style={{ marginLeft: 8 }}>Stoppa transkribering</button>
+          <button onClick={sendPing} style={{ marginLeft: 8 }}>Ping backend</button>
         </div>
         <div style={{ marginBottom: 16 }}>
           <b>Status:</b> {status}
         </div>
-        <div style={{ background: "#f4f4f4", padding: 16, minHeight: 120, borderRadius: 8 }}>
-          <pre style={{ whiteSpace: "pre-wrap" }}>{transcript}</pre>
+        <div style={{ background: "#fffbe6", padding: 24, minHeight: 180, borderRadius: 12, border: '2px solid #f4b400', marginBottom: 24 }}>
+          <h2 style={{ marginTop: 0, color: '#b8860b' }}>Transkriberad text</h2>
+          <pre style={{ whiteSpace: "pre-wrap", fontSize: 18, color: '#222', margin: 0 }}>{transcript || 'Ingen text mottagen ännu.'}</pre>
+          {aiFeedback && (
+            <div style={{ marginTop: 16, background: '#e3f2fd', padding: 12, borderRadius: 8, color: '#1565c0' }}>
+              <b>AI-feedback:</b>
+              <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{JSON.stringify(aiFeedback, null, 2)}</pre>
+            </div>
+          )}
         </div>
+        {blockAnalysis && (
+          <div style={{ background: '#e8f5e9', padding: 16, borderRadius: 8, border: '2px solid #388e3c', marginBottom: 24 }}>
+            <h2 style={{ margin: 0, color: '#388e3c' }}>Blockanalys (AI)</h2>
+            <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{JSON.stringify(blockAnalysis, null, 2)}</pre>
+          </div>
+        )}
+        {contextAnalysis && (
+          <div style={{ background: '#fff3e0', padding: 16, borderRadius: 8, border: '2px solid #f57c00', marginBottom: 24 }}>
+            <h2 style={{ margin: 0, color: '#f57c00' }}>Sektions-/Kontextanalys (AI)</h2>
+            <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{JSON.stringify(contextAnalysis, null, 2)}</pre>
+          </div>
+        )}
         <h2>Logg</h2>
         <ul style={{ background: "#222", color: "#fff", padding: 12, borderRadius: 8, fontSize: 14 }}>
           {log.map((row, i) => (

@@ -4,9 +4,8 @@ from websockets.legacy.server import serve  # Use legacy server for compatibilit
 from streaming_processor import StreamingProcessor  # Import the new streaming processor
 import logging
 import json
-import numpy as np
+import numpy as np  # Flyttad hit för att np alltid ska vara globalt tillgänglig
 import sounddevice as sd
-import numpy as np
 import threading
 import queue
 import time
@@ -23,6 +22,8 @@ from audio_processor import AudioProcessor, AudioProcessingError
 from config import load_config
 from logging_config import setup_logging
 from audio_monitor import AudioLevelMonitor, create_level_meter
+from gpt_analyzer import analyze_notes
+from audio_normalizer import normalize_audio_to_target
 
 # === CONFIGURATION ===
 logger = setup_logging("VoicemeeterServer", level=logging.DEBUG)
@@ -124,6 +125,67 @@ class FrameworkManager:
         return self.active_framework
 
 # === AUDIO PROCESSING ===
+# === ASYNKRONA ANALYSARBETARE ===
+class DiarizationWorker(threading.Thread):
+    def __init__(self, audio_queue, websocket=None):
+        super().__init__(daemon=True)
+        self.audio_queue = audio_queue
+        self.websocket = websocket
+        self.running = True
+    def run(self):
+        from audio_processor import AudioProcessor
+        processor = AudioProcessor(config)
+        while self.running:
+            try:
+                audio_block = self.audio_queue.get(timeout=1)
+                diarization_result = processor.retroactive_diarization(audio_block)
+                if self.websocket:
+                    message_queue.put({
+                        "websocket": self.websocket,
+                        "message": {
+                            "type": "diarization",
+                            "result": diarization_result,
+                            "timestamp": time.time()
+                        }
+                    })
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logger.error(f"DiarizationWorker error: {e}")
+
+class ContextWorker(threading.Thread):
+    def __init__(self, text_queue, websocket=None):
+        super().__init__(daemon=True)
+        self.text_queue = text_queue
+        self.websocket = websocket
+        self.running = True
+    def run(self):
+        from gpt_analyzer import analyze_context
+        buffer = []
+        BLOCK_SIZE = 5
+        while self.running:
+            try:
+                text = self.text_queue.get(timeout=1)
+                buffer.append(text)
+                if len(buffer) >= BLOCK_SIZE:
+                    block_text = " ".join(buffer)
+                    context_result = analyze_context(block_text)
+                    if self.websocket:
+                        message_queue.put({
+                            "websocket": self.websocket,
+                            "message": {
+                                "type": "context_analysis",
+                                "context": block_text,
+                                "context_result": context_result,
+                                "timestamp": time.time()
+                            }
+                        })
+                    buffer.clear()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logger.error(f"ContextWorker error: {e}")
+
 class ProcessingThread(threading.Thread):
     def __init__(self, websocket=None):
         super().__init__()
@@ -135,6 +197,15 @@ class ProcessingThread(threading.Thread):
         self.websocket = websocket
         self.last_log_time = time.time()
         self.silence_threshold = 0.01  # Define silence_threshold as a class attribute
+        self.last_block_time = time.time()  # Gör till instansvariabel
+        self.transcription_start_time = None  # För startfördröjning
+        self.silent_start_delay = 4  # sekunder
+        self.audio_analysis_queue = queue.Queue()
+        self.text_analysis_queue = queue.Queue()
+        self.diarization_worker = DiarizationWorker(self.audio_analysis_queue, websocket)
+        self.context_worker = ContextWorker(self.text_analysis_queue, websocket)
+        self.diarization_worker.start()
+        self.context_worker.start()
         
         # Start listening to Voicemeeter immediately
         self.start_recording()
@@ -221,54 +292,145 @@ class ProcessingThread(threading.Thread):
                 logger.warning("Audio queue full, dropping frame")
 
     def run(self):
-        """Process audio data from the queue."""
+        import time
         logger.info("Audio processing thread started.")
         accumulated_audio = []
-        
+        block_buffer = []
+        BLOCK_SIZE = 1  # 1 block = 0.5 sek ljud
+        BLOCK_SAMPLES = 8000  # 0.5 sek vid 16 kHz
+        VAD_THRESHOLD = 0.01  # Enkel VAD: block under denna nivå ignoreras
+        context_buffer = []
+        CONTEXT_BLOCKS = 3
+        self.transcription_start_time = None
+        self.silent_start_delay = 4
         while self.running:
             try:
-                # Use a timeout to avoid blocking for too long
+                queue_start = time.time()
                 audio_data = self.audio_queue.get(timeout=0.1)
-                
-                # Accumulate audio until we have enough for processing
+                logger.info(f"[TIMER] Got audio from queue at {queue_start:.3f}")
                 accumulated_audio.append(audio_data)
-                
-                # Increase the amount of accumulated audio to ensure enough data for the model
-                # Process ~1 second of audio instead of 0.5 seconds
-                if len(accumulated_audio) >= 10:  # Increased from 5 to 10 chunks
-                    audio_chunk = np.concatenate(accumulated_audio)
-                    
-                    # Log audio level and shape for debug purposes
-                    audio_level = np.abs(audio_chunk).max()
-                    logger.debug(f"Processing audio chunk, max level: {audio_level:.4f}, shape: {audio_chunk.shape}, threshold: {self.silence_threshold}")
-                    
-                    # Only process if audio is loud enough
-                    if audio_level >= self.silence_threshold:
-                        text = self.process_audio(audio_chunk)
-                        
-                        if text and text.strip():
-                            logger.info(f"[WS -> Client] Transcribed text: {text}")
-                            
-                            # Queue message for sending via WebSocket
+                # Samla tills vi har 1 sek ljud (AssemblyAI-style)
+                total_samples = sum(len(chunk) for chunk in accumulated_audio)
+                if total_samples >= BLOCK_SAMPLES:
+                    audio_chunk = np.concatenate(accumulated_audio)[:BLOCK_SAMPLES].flatten()
+                    accumulated_audio = []  # Töm bufferten, ingen överlapp
+                    max_level = np.abs(audio_chunk).max()
+                    logger.info(f"[DEBUG] NYTT BLOCK: max_level={max_level:.4f}, shape={audio_chunk.shape}")
+                    # VAD-tröskel AVAKTIVERAD
+                    # if (max_level < VAD_THRESHOLD):
+                    #     logger.info(f"[VAD] Block ignorerad (max_level={max_level:.4f} < {VAD_THRESHOLD})")
+                    #     continue
+                    # Normalisera
+                    audio_chunk = normalize_audio_to_target(audio_chunk, target_peak=0.7)
+                    process_start = time.time()
+                    text = self.process_audio(audio_chunk)
+                    logger.info(f"[TIMER] process_audio returned at {time.time():.3f} (elapsed: {time.time()-process_start:.3f}s)")
+                    logger.info(f"[DEBUG] Transcription result: '{text}'")
+                    # --- Silent start delay AVAKTIVERAD ---
+                    # if self.transcription_start_time is None:
+                    #     self.transcription_start_time = time.time()
+                    # if time.time() - self.transcription_start_time < self.silent_start_delay:
+                    #     logger.debug("Silent start delay aktiv, hoppar över transkribering.")
+                    #     accumulated_audio = accumulated_audio[-2:] if len(accumulated_audio) > 2 else []
+                    #     continue
+                    # --- VAD-plats (för framtida pyannote/webrtcvad) ---
+                    # TODO: Lägg in VAD här om du vill använda pyannote/webrtcvad
+
+                    # --- FÖRBÄTTRAD FILTRERING OCH DUBBELKOLL ---
+                    logger.debug(f"[DEBUG] Audio chunk shape: {audio_chunk.shape}, max level: {max_level:.4f}")
+                    process_start = time.time()
+                    # Normalisera ljudet innan transkribering
+                    audio_chunk = normalize_audio_to_target(audio_chunk, target_peak=0.6)
+                    text = self.process_audio(audio_chunk)
+                    logger.info(f"[TIMER] process_audio returned at {time.time():.3f} (elapsed: {time.time()-process_start:.3f}s)")
+                    logger.debug(f"[DEBUG] Transcription result: '{text}'")
+                    # ---
+                    if text and text.strip():
+                        logger.info(f"[WS -> Client] Transcribed text: {text}")
+                        ai_feedback = analyze_notes(text)
+                        # --- Blockanalys ---
+                        block_buffer.append(text)
+                        BLOCK_INTERVAL = 5  # sekunder mellan blockanalys
+                        if len(block_buffer) >= BLOCK_SIZE or (time.time() - self.last_block_time) > BLOCK_INTERVAL:
+                            block_text = " ".join(block_buffer)
+                            from gpt_analyzer import analyze_block
+                            block_result = analyze_block(block_text)
                             if self.websocket:
                                 message_queue.put({
                                     "websocket": self.websocket,
                                     "message": {
-                                        "type": "transcription", 
-                                        "text": text,
+                                        "type": "block_analysis",
+                                        "block": block_text,
+                                        "block_result": block_result,
                                         "timestamp": time.time()
                                     }
                                 })
-                                logger.debug(f"Queued transcription message: {text}")
-                            else:
-                                logger.warning("No websocket connection available to send transcription")
+                            block_buffer.clear()
+                            self.last_block_time = time.time()
+                        # ---
+                        # --- Kontextanalys ---
+                        context_buffer.append(text)
+                        if len(context_buffer) >= BLOCK_SIZE * CONTEXT_BLOCKS:
+                            full_text = " ".join(context_buffer)
+                            from gpt_analyzer import analyze_context
+                            context_result = analyze_context(full_text)
+                            if self.websocket:
+                                message_queue.put({
+                                    "websocket": self.websocket,
+                                    "message": {
+                                        "type": "context_analysis",
+                                        "context": full_text,
+                                        "context_result": context_result,
+                                        "timestamp": time.time()
+                                    }
+                                })
+                            context_buffer.clear()
+                        # ---
+                        # Queue message for sending via WebSocket
+                        if self.websocket:
+                            send_time = time.time()
+                            total_elapsed = None
+                            if hasattr(self, '_last_transcribe_time'):
+                                total_elapsed = send_time - self._last_transcribe_time
+                                logger.info(f"[TIMER] Transkribering: tid från start till skickad till frontend: {total_elapsed:.3f}s (själva transkriberingen: {getattr(self, '_last_transcribe_elapsed', 'N/A'):.3f}s)")
+                            message_queue.put({
+                                "websocket": self.websocket,
+                                "message": {
+                                    "type": "transcription",
+                                    "text": text,
+                                    "timestamp": send_time,
+                                    "ai_feedback": ai_feedback
+                                }
+                            })
+                            logger.debug(f"Queued transcription message: {text}")
                         else:
-                            logger.debug("No transcription result from audio chunk (empty text)")
+                            logger.warning("No websocket connection available to send transcription")
+                        # Skicka ljud och text till analysarbetare parallellt
+                        self.audio_analysis_queue.put(audio_chunk)
+                        self.text_analysis_queue.put(text)
                     else:
-                        logger.debug(f"Audio level {audio_level:.4f} below threshold {self.silence_threshold}, skipping")
+                        logger.debug("No transcription result from audio chunk (empty text)")
                     
-                    # Keep a small overlap for continuous speech
-                    accumulated_audio = accumulated_audio[-2:] if len(accumulated_audio) > 2 else []
+                    # Playback för felsökning: spela upp ljudet som skickas till transkribering
+                    try:
+                        print("[DEBUG] Spelar upp ljudfil som skickas till transkribering...")
+                        TEST_TONE = False  # Sätt till True för syntetisk ton, False för fil
+                        if not TEST_TONE:
+                            import wave
+                            import numpy as np
+                            wf = wave.open("test_audio_output_trimmed.wav", 'rb')
+                            samplerate = wf.getframerate()
+                            frames = wf.readframes(wf.getnframes())
+                            audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+                            sd.play(audio, samplerate)
+                            sd.wait()
+                            wf.close()
+                        else:
+                            # ...syntetisk tonkod här om du vill växla tillbaka...
+                            pass
+                    except Exception as e:
+                        logger.warning(f"Playback-felsökning misslyckades: {e}")
+                        
             except queue.Empty:
                 pass  # No audio data in queue
             except Exception as e:
@@ -279,7 +441,9 @@ class ProcessingThread(threading.Thread):
         logger.info("Audio processing thread stopped.")
 
     def process_audio(self, audio_data: np.ndarray) -> str:
-        """Process the audio data and return the transcription."""
+        import time
+        start_time = time.time()
+        logger.info(f"[TIMER] process_audio START {start_time:.3f}")
         try:
             # Skip processing if audio is too quiet (redundant check, already done in run())
             if np.abs(audio_data).max() < self.silence_threshold:
@@ -289,32 +453,12 @@ class ProcessingThread(threading.Thread):
             # Use the StreamingProcessor's process_streaming method
             logger.debug(f"Calling process_streaming with audio shape: {audio_data.shape}")
             text = self.processor.process_streaming(audio_data)
-            logger.info(f"Processed text: {text}")  # Add logging
-            
-            # Debug: Log transcription result
-            logger.debug(f"Transcription result: {text}")
-            
-            if text:
-                # Send the text through WebSocket
-                if self.websocket:
-                    logger.info(f"📤 Sending to WebSocket: '{text}'")
-                    message_queue.put({
-                        "websocket": self.websocket,
-                        "message": {
-                            "type": "transcription",
-                            "text": text,
-                            "timestamp": time.time()
-                        }
-                    })
-                    logger.info("✅ Message queued for sending")
-                    # Debug: Log when transcription is sent to WebSocket
-                    logger.debug(f"[WebSocket] Sending transcription: {text}")
-            else:
-                logger.debug("process_streaming returned empty text")
-                
-            # Debug: Log transcription result before sending to WebSocket
-            logger.debug(f"Transcription result ready to send: {text}")
-
+            end_time = time.time()
+            elapsed = end_time - start_time
+            logger.info(f"[TIMER] process_audio END {end_time:.3f} (elapsed: {elapsed:.3f}s)")
+            # Spara tiden för vidare loggning när text skickas till frontend
+            self._last_transcribe_time = start_time
+            self._last_transcribe_elapsed = elapsed
             return text
         except Exception as e:
             logger.error(f"Error processing audio: {e}")
@@ -330,6 +474,31 @@ server_running = False
 transcription_running = False
 processing_thread: Optional[ProcessingThread] = None
 
+def make_json_serializable(obj):
+    """Helper för att konvertera objekt till JSON-serialiserbara former."""
+    if hasattr(obj, 'to_dict'):
+        return obj.to_dict()
+    if hasattr(obj, '__dict__'):
+        return obj.__dict__
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (set,)):
+        return list(obj)
+    if isinstance(obj, bytes):
+        return obj.decode(errors='replace')
+    return str(obj)
+
+def convert_dict_keys_to_str(obj):
+    """Rekursivt konvertera alla dict-nycklar till str (för JSON-serialisering)."""
+    if isinstance(obj, dict):
+        return {str(k): convert_dict_keys_to_str(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_dict_keys_to_str(i) for i in obj]
+    elif isinstance(obj, tuple):
+        return tuple(convert_dict_keys_to_str(i) for i in obj)
+    else:
+        return obj
+
 # Process outgoing messages in the main asyncio loop
 async def process_messages():
     """Process outgoing WebSocket messages from the queue"""
@@ -342,7 +511,9 @@ async def process_messages():
                 item = message_queue.get_nowait()
                 websocket = item["websocket"]
                 message = item["message"]
-                
+                # Konvertera alla dict-nycklar till str innan serialisering
+                message_safe = convert_dict_keys_to_str(message)
+                logger.info(f"[FRONTEND-DEBUG] Skickar till frontend: {json.dumps(message_safe, ensure_ascii=False, default=make_json_serializable)[:500]}")
                 # Check if the WebSocket is still open
                 if not websocket.open:
                     logger.warning("WebSocket is closed, can't send message")
@@ -351,7 +522,7 @@ async def process_messages():
                 
                 try:
                     # Convert the message to JSON
-                    message_json = json.dumps(message)
+                    message_json = json.dumps(message_safe, default=make_json_serializable)
                     logger.debug(f"Sending transcription to client: {message_json[:100]}...")
                     
                     # Debug: Log when sending transcription to WebSocket client
@@ -397,6 +568,9 @@ async def handle_websocket(websocket: WebSocketServerProtocol):
                 continue
 
             cmd = data.get('command')
+            if cmd == 'ping':
+                await websocket.send(json.dumps({"type": "pong", "timestamp": time.time()}))
+                continue
             if cmd == 'start_server':
                 if not server_running:
                     server_running = True

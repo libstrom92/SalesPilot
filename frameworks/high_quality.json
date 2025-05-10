@@ -14,7 +14,7 @@
     },
     "model": {
       "size": "large",
-      "compute_type": "float32"
+      "compute_type": "float16"
     },
     "transcription": {
       "mode": "accurate"

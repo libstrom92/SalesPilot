@@ -11,6 +11,7 @@ import soundfile as sf
 from config import load_config
 from audio_processor import AudioProcessor
 import threading
+from audio_normalizer import normalize_audio_to_target
 
 logger = setup_logging("AudioTest")
 
@@ -21,7 +22,8 @@ def signal_handler(signum, frame):
 
 def parse_args():
     """Parse command line arguments"""
-    parser = argparse.ArgumentParser(description="Testa ljudingång och nivåer")
+    parser = argparse.ArgumentParser(description="Testa ljudingång och nivåer eller putthrough")
+    parser.add_argument("--putthrough", action="store_true", help="Kör direkt putthrough (mikrofon till högtalare)")
     parser.add_argument("--device", type=int,
                        help="Ljudenhets-ID (åsidosätter AUDIO_DEVICE_ID)")
     return parser.parse_args()
@@ -91,12 +93,7 @@ def test_audio_input(device_id: int):
 
     # Normalisera ljudet
     recorded_audio = np.concatenate(recorded_audio, axis=0)
-    def normalize_audio(audio, target_peak=0.99):
-        peak = np.max(np.abs(audio))
-        if peak == 0:
-            return audio
-        return audio * (target_peak / peak)
-    recorded_audio = normalize_audio(recorded_audio)
+    recorded_audio = normalize_audio_to_target(recorded_audio, target_peak=0.8)
 
     def transcribe_and_print(audio):
         print("\n📝 Transkriberar inspelat ljud...")
@@ -110,15 +107,38 @@ def test_audio_input(device_id: int):
         except Exception as e:
             print(f"Fel vid transkribering: {e}")
 
+
+    def play_audio_safe(audio_data, samplerate):
+        import sounddevice as sd
+        try:
+            # Försök spela upp på default-enheten
+            sd.play(audio_data, samplerate)
+            sd.wait()
+            return True
+        except Exception as e:
+            print(f"[VARNING] Standarduppspelning misslyckades: {e}")
+            # Försök hitta första tillgängliga output device
+            try:
+                devices = sd.query_devices()
+                output_devices = [i for i, d in enumerate(devices) if d['max_output_channels'] > 0]
+                for dev_id in output_devices:
+                    try:
+                        print(f"Försöker spela upp på enhet {dev_id}: {devices[dev_id]['name']}")
+                        sd.play(audio_data, samplerate, device=dev_id)
+                        sd.wait()
+                        print(f"Uppspelning lyckades på enhet {dev_id}: {devices[dev_id]['name']}")
+                        return True
+                    except Exception as e2:
+                        print(f"Misslyckades på enhet {dev_id}: {e2}")
+                print("Ingen output-enhet kunde användas för uppspelning.")
+            except Exception as e3:
+                print(f"Fel vid felsökning av output-enheter: {e3}")
+        return False
+
     print("\n🔊 Spelar upp inspelat ljud...")
     transcribe_thread = threading.Thread(target=transcribe_and_print, args=(recorded_audio,))
     transcribe_thread.start()
-    try:
-        sd.play(recorded_audio, samplerate=16000)
-        sd.wait()
-    except KeyboardInterrupt:
-        print("\nUppspelning avbruten. Väntar på transkribering...")
-        sd.stop()
+    play_audio_safe(recorded_audio, 16000)
     transcribe_thread.join()
 
 def main():
@@ -130,4 +150,7 @@ def main():
     test_audio_input(device_id)
 
 if __name__ == "__main__":
+    args = parse_args()
+    device_id = get_device_id(args)
+    # Ta bort putthrough-läget, kör alltid vanlig inspelning/test
     main()

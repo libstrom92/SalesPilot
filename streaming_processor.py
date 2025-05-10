@@ -17,7 +17,10 @@ class StreamingProcessor:
     def __init__(self, config: Dict[str, Any]):
         self.logger = logger
         self.config = config
-        self.sample_rate = 48000  # Ensure 48 kHz sample rate
+        # Sätt sample_rate och channels till samma som i test_audio_input.py
+        self.sample_rate = 16000  # Matchar test_audio_input.py och main_server.py
+        self.channels = 1
+        self.device = config.get("audio_device_id", 2)  # Default till 2 om inget anges
         self.whisper_model = (
             config.get("whisper_model") or
             config.get("model", {}).get("size") or
@@ -45,7 +48,7 @@ class StreamingProcessor:
         self.max_queue_size = 10  # Limit the processing queue size to prevent overflows
 
         # Debug: Log initialization details
-        self.logger.debug(f"Sample rate: {self.sample_rate}, Buffer size: {self.buffer_size}, Max queue size: {self.max_queue_size}")
+        self.logger.debug(f"Sample rate: {self.sample_rate}, Channels: {self.channels}, Device: {self.device}, Buffer size: {self.buffer_size}, Max queue size: {self.max_queue_size}")
         self.logger.debug(f"Whisper model: {self.whisper_model}, Compute type: {self.compute_type}")
 
         # Debug: Log language and prompt settings
@@ -71,7 +74,7 @@ class StreamingProcessor:
         # Buffer for accumulating audio
         self.audio_buffer = []
         self.buffer_lock = threading.Lock()
-        self.max_buffer_size = 2 * self.sample_rate  # Reduced to 2 seconds for faster processing
+        self.max_buffer_size = int(0.5 * self.sample_rate)  # 0.5 seconds for best practice low latency
         
         # Processing queue and thread
         self.processing_queue = queue.Queue()
@@ -107,9 +110,9 @@ class StreamingProcessor:
             total_samples = sum(len(chunk) for chunk in self.audio_buffer)
             self.logger.debug(f"Total buffer length after appending: {total_samples} samples")
 
-            # Debug: Log buffer processing trigger
-            if total_samples > self.max_buffer_size:
-                self.logger.debug("Buffer size exceeded max limit, triggering processing")
+            # Process buffer as soon as it reaches min_audio_length (best practice)
+            if total_samples >= int(self.sample_rate * self.min_audio_length):
+                self.logger.debug("Buffer reached min_audio_length, triggering processing immediately (best practice)")
                 self._process_buffer()
                 
     def set_result_callback(self, callback) -> None:
@@ -178,7 +181,7 @@ class StreamingProcessor:
                 self.logger.error(f"Error in processing loop: {e}")
                 
     def _transcribe_chunk(self, audio: np.ndarray) -> str:
-        """Transcribe audio chunk with optimized settings"""
+        """Transcribe audio chunk with best-in-class settings"""
         try:
             # Skip processing if audio is too quiet
             if np.abs(audio).max() < 0.01:
@@ -196,11 +199,14 @@ class StreamingProcessor:
             # Use optimized transcription settings for svenska
             segments, _ = self.model.transcribe(
                 audio_float,
-                beam_size=2,  # Slightly increase beam size for better accuracy
+                beam_size=2,
+                best_of=2,
                 language=self.language,
                 task="transcribe",
-                vad_filter=True,  # Endast röstsegment
+                condition_on_previous_text=True,
                 initial_prompt=self.initial_prompt,
+                vad_filter=True,
+                no_speech_threshold=0.2,
                 word_timestamps=False
             )
             self.logger.debug(f"Transcription produced {len(list(segments))} segments")
@@ -219,7 +225,7 @@ class StreamingProcessor:
             return ""
             
     def process_streaming(self, audio_chunk: np.ndarray) -> str:
-        """Process a small audio chunk for streaming transcription"""
+        """Process a small audio chunk for streaming transcription with best-in-class settings."""
         try:
             # Log some audio samples for debugging
             if len(audio_chunk) > 0:
@@ -254,14 +260,15 @@ class StreamingProcessor:
             # Transcribe med svenska optimering - VAD DISABLED for debugging
             segments, info = self.model.transcribe(
                 audio_float,
-                beam_size=5,            # Increased for better accuracy
+                beam_size=2,
+                best_of=2,
                 language=self.language,
                 task="transcribe",
-                vad_filter=True,  # Endast röstsegment
+                vad_filter=True,
                 initial_prompt=self.initial_prompt,
                 condition_on_previous_text=True,
-                no_speech_threshold=0.6,  # Mycket högre tolerans (default 0.6)
-                compression_ratio_threshold=2.4  # Högre tolerans (default 2.4)
+                no_speech_threshold=0.2,
+                compression_ratio_threshold=2.4
             )
             
             # Convert segment iterator to list to use it multiple times
@@ -277,7 +284,21 @@ class StreamingProcessor:
             
             # Collect the text
             text = " ".join([s.text for s in segment_list if s.text.strip()])
-            
+
+            # === Filtrering mot hallucination/prompt ===
+            prompt_clean = self.initial_prompt.strip().lower()
+            text_clean = text.strip().lower()
+            # Skicka inte om texten är tom, identisk med prompten, eller för kort
+            if not text_clean:
+                self.logger.info("Ingen text genererad (tom sträng)")
+                return ""
+            if text_clean == prompt_clean:
+                self.logger.info("Transkribering matchar prompten - skickas ej till frontend")
+                return ""
+            if len(text_clean) < 8:  # Justera längdtröskel vid behov
+                self.logger.info(f"Transkribering för kort ('{text_clean}') - skickas ej till frontend")
+                return ""
+
             if text.strip():
                 self.logger.info(f"🎯 Got transcription segments: {len(segment_list)}")
                 self.logger.info(f"✨ Transcribed text: '{text}'")
@@ -323,3 +344,5 @@ class StreamingProcessor:
         """
         self.logger.info(f"Fine-tuning för domän {domain} planerad (framtida funktion)")
         # TODO: Implementera finjustering med HuggingFace eller liknande
+
+# TODO: Lägg till stöd för domänspecifik prompt och dialektigenkänning

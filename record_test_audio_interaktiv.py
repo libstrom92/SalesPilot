@@ -40,3 +40,14 @@ with wave.open(OUTPUT_FILE, 'wb') as wf:
     wf.writeframes(recording.tobytes())
 
 print(f"✅ Sparad som {OUTPUT_FILE}. Spela upp för att kontrollera ljudet.")
+
+# Spela upp ljudet direkt efter inspelning
+import simpleaudio as sa
+try:
+    print("▶️ Spelar upp ljudet...")
+    wave_obj = sa.WaveObject.from_wave_file(OUTPUT_FILE)
+    play_obj = wave_obj.play()
+    play_obj.wait_done()
+    print("🔊 Uppspelning klar.")
+except Exception as e:
+    print(f"❌ Kunde inte spela upp ljudet: {e}")

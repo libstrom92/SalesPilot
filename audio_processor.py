@@ -130,14 +130,14 @@ class AudioProcessor:
 
             segments, _ = self.model.transcribe(
                 audio,
-                beam_size=5,
+                beam_size=2,
                 best_of=2,  # Added for slightly better accuracy
                 language=os.getenv("WHISPER_LANGUAGE", "sv"),  # Set default language to Swedish
                 task="transcribe",
                 condition_on_previous_text=True,  # Enable context awareness
                 vad_filter=True,  # Enable VAD
                 # vad_segments=True,  # (BORTTAGET: stöds ej i denna version)
-                no_speech_threshold=0.05  # Lower threshold for detecting speech
+                no_speech_threshold=0.2  # Lower threshold for detecting speech
             )
             segments = list(segments)
             
@@ -154,7 +154,7 @@ class AudioProcessor:
             raise TranscriptionError(f"Could not transcribe audio: {e}")
 
     def process_streaming(self, audio_chunk: np.ndarray) -> str:
-        """Process a small audio chunk for streaming transcription with detailed logging."""
+        """Process a small audio chunk for streaming transcription with best-in-class settings."""
         try:
             # Filter out silent audio segments before processing
             if np.abs(audio_chunk).max() < 0.001:
@@ -187,13 +187,13 @@ class AudioProcessor:
             self.logger.debug("Processing audio buffer for transcription...")
             segments, _ = self.model.transcribe(
                 audio_float,
-                beam_size=1,  # Reduced beam size for faster processing
-                best_of=1,  # Simplified for real-time performance
+                beam_size=2,  # Reduced beam size for faster processing
+                best_of=2,  # Simplified for real-time performance
                 language=os.getenv("WHISPER_LANGUAGE", "sv"),  # Set default language to Swedish
                 task="transcribe",
-                condition_on_previous_text=False,  # Disable context awareness for speed
+                condition_on_previous_text=True,  # Enable context awareness for speed
                 vad_filter=True,  # Enable VAD
-                no_speech_threshold=0.1  # Lower threshold for detecting speech
+                no_speech_threshold=0.2  # Lower threshold for detecting speech
             )
 
             # Log transcription result
@@ -209,7 +209,7 @@ class AudioProcessor:
             return ""
 
     def process_streaming_with_context(self, audio_chunk: np.ndarray, previous_context: str = "") -> str:
-        """Process a small audio chunk for streaming transcription with context awareness."""
+        """Process a small audio chunk for streaming transcription with context awareness and best-in-class settings."""
         try:
             # Filter out silent audio segments before processing
             if np.abs(audio_chunk).max() < 0.001:
@@ -242,14 +242,14 @@ class AudioProcessor:
             self.logger.debug("Processing audio buffer with context for transcription...")
             segments, _ = self.model.transcribe(
                 audio_float,
-                beam_size=3,  # Slightly higher beam size for better accuracy
+                beam_size=2,  # Slightly higher beam size for better accuracy
                 best_of=2,  # Balance between speed and quality
                 language=os.getenv("WHISPER_LANGUAGE", "sv"),  # Set default language to Swedish
                 task="transcribe",
                 condition_on_previous_text=True,  # Enable context awareness
                 initial_prompt=previous_context,  # Use previous context
                 vad_filter=True,  # Enable VAD
-                no_speech_threshold=0.1  # Lower threshold for detecting speech
+                no_speech_threshold=0.2  # Lower threshold for detecting speech
             )
 
             # Log transcription result
@@ -387,7 +387,7 @@ class AudioProcessor:
             import json
             from datetime import datetime
             
-            os.makedirs('conversation_logs', exist_okay=True)
+            os.makedirs('conversation_logs', exist_ok=True)
             
             filename = f"conversation_logs/conversation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             
@@ -449,19 +449,19 @@ class AudioProcessor:
         return " ".join(results)
 
     def _transcribe_audio_realtime(self, audio: np.ndarray) -> str:
-        """Snabb transkribering för realtid (beam_size=1, best_of=1, ingen context)."""
+        """Snabb transkribering för realtid (best-in-class settings)."""
         try:
             if len(audio.shape) > 1:
                 audio = np.mean(audio, axis=1)
             segments, _ = self.model.transcribe(
                 audio,
-                beam_size=1,
-                best_of=1,
+                beam_size=2,
+                best_of=2,
                 language=os.getenv("WHISPER_LANGUAGE", "sv"),
                 task="transcribe",
-                condition_on_previous_text=False,
+                condition_on_previous_text=True,
                 vad_filter=True,
-                no_speech_threshold=0.1
+                no_speech_threshold=0.2
             )
             segments = list(segments)
             if not segments:

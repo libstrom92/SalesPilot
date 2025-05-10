@@ -54,9 +54,22 @@ def start_server():
         logger.info("Server process started")
         time.sleep(2)  # Wait for server to start
 
-        # Open web interface
-        webbrowser.open('http://localhost:9091')
-        logger.info("Opened web interface")
+        # --- Kopiera websocket_port.txt till frontend/public ---
+        src = script_dir / "websocket_port.txt"
+        dest = script_dir / "my-transcribe-app" / "public" / "websocket_port.txt"
+        try:
+            if src.exists():
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with open(src, "r") as fsrc, open(dest, "w") as fdest:
+                    fdest.write(fsrc.read())
+                print(f"INFO: Kopierade websocket_port.txt till {dest}")
+            else:
+                print("VARNING: websocket_port.txt saknas, kunde inte kopiera till frontend/public.")
+        except Exception as e:
+            print(f"VARNING: Kunde inte kopiera websocket_port.txt: {e}")
+
+        print("INFO: Server igång! (WebSocket-port enligt websocket_port.txt)")
+        logger.info("Server startup complete")
         return True
     except Exception as e:
         print(f"ERROR: Error starting server: {e}")
