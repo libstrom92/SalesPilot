@@ -17,6 +17,10 @@ from pathlib import Path
 from queue import Queue
 import sys
 import socket
+import traceback  # Add this import at the top of the file to handle error traces
+from flask import Flask, send_file  # Import Flask and send_file for the new route
+import scipy.io.wavfile as wav  # Import wav for saving audio
+import io  # Import io for BytesIO
 
 from audio_processor import AudioProcessor, AudioProcessingError
 from config import load_config
@@ -206,6 +210,8 @@ class ProcessingThread(threading.Thread):
         self.context_worker = ContextWorker(self.text_analysis_queue, websocket)
         self.diarization_worker.start()
         self.context_worker.start()
+        self._last_transcribe_time = None  # Lägg till detta attribut
+        self._last_transcribe_elapsed = None  # Lägg till detta attribut
         
         # Start listening to Voicemeeter immediately
         self.start_recording()
@@ -247,49 +253,47 @@ class ProcessingThread(threading.Thread):
                 logger.error(f"Error stopping Voicemeeter B1 stream: {e}")
         self.running = False
 
-    def audio_callback(self, indata, frames, time_info, status):
-        """Callback to handle incoming audio data from Voicemeeter B1 (SYNKRON)."""
-        current_time = time.time()
-        
-        # Debug: Log audio capture details
-        logger.debug(f"Audio callback received data with shape: {indata.shape}, dtype: {indata.dtype}")
+    def start_transcription_thread(self):
+        """Start a separate thread for handling transcription."""
+        if not hasattr(self, 'transcription_thread') or not self.transcription_thread.is_alive():
+            self.transcription_thread = threading.Thread(target=self.transcription_worker, daemon=True)
+            self.transcription_thread.start()
 
-        # Debug: Log audio level
-        max_audio_level = np.abs(indata).max()
-        logger.debug(f"Audio level (max): {max_audio_level:.4f}")
-
-        # Log every second
-        if current_time - self.last_log_time >= 1.0:
-            self.last_log_time = current_time
-            # Add audio level check to determine if audio is being captured
-            max_audio_level = np.abs(indata).max()
-            logger.debug(f"Audio callback active. Queue size: {self.audio_queue.qsize()}, Level: {max_audio_level:.4f}")
-            
-            # Log audio levels in dBFS in the callback
-            rms = np.sqrt(np.mean(np.square(indata)))
-            dbfs = 20 * np.log10(rms) if rms > 0 else -float('inf')
-            logger.debug(f"Audio callback level (dBFS): {dbfs:.2f}")
-            
-        if status:
-            logger.warning(f"Audio stream status: {status}")
-            
-        if self.running:
-            # Check if the audio is silent
-            if np.abs(indata).max() < 0.001:  # Very low audio level
-                return  # Skip processing silent frames
-            
-            # Throttle in audio_callback
-            if self.audio_queue.qsize() > 450:
-                logger.warning("Audio queue near full, dropping frame")
-                return
-            
+    def transcription_worker(self):
+        """Worker function to handle transcription in a separate thread."""
+        while self.running:
             try:
-                if not self.audio_queue.full():
-                    self.audio_queue.put(indata.copy())  # INGEN await här!
-                else:
-                    logger.warning("Audio queue full, dropping frame")
-            except queue.Full:
-                logger.warning("Audio queue full, dropping frame")
+                audio_data = self.audio_queue.get(timeout=0.1)
+                self.process_audio(audio_data)
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logger.error(f"Error in transcription worker: {e}")
+
+    def audio_callback(self, indata, frames, time_info, status):
+        """Callback för att hantera inkommande ljuddata från Voicemeeter B1."""
+        current_time = time.time()
+
+        # Realtidsuppspelning av ljud
+        try:
+            sd.play(indata, samplerate=SAMPLE_RATE)
+        except Exception as e:
+            logger.error(f"Fel vid realtidsuppspelning: {e}")
+
+        # Debug: Logga ljudnivå
+        max_audio_level = np.abs(indata).max()
+        logger.debug(f"Ljudnivå (max): {max_audio_level:.4f}")
+
+        # Filtrera bort lågvolymbrus
+        if max_audio_level < self.silence_threshold:
+            logger.debug("Ljudnivå under tröskel, ignorerar.")
+            return
+
+        # Lägg till ljuddata i kön
+        if not self.audio_queue.full():
+            self.audio_queue.put(indata.copy())
+        else:
+            logger.warning("Ljudkön är full, släpper ram.")
 
     def run(self):
         import time
@@ -390,7 +394,7 @@ class ProcessingThread(threading.Thread):
                         if self.websocket:
                             send_time = time.time()
                             total_elapsed = None
-                            if hasattr(self, '_last_transcribe_time'):
+                            if self._last_transcribe_time is not None:
                                 total_elapsed = send_time - self._last_transcribe_time
                                 logger.info(f"[TIMER] Transkribering: tid från start till skickad till frontend: {total_elapsed:.3f}s (själva transkriberingen: {getattr(self, '_last_transcribe_elapsed', 'N/A'):.3f}s)")
                             message_queue.put({
@@ -411,26 +415,6 @@ class ProcessingThread(threading.Thread):
                     else:
                         logger.debug("No transcription result from audio chunk (empty text)")
                     
-                    # Playback för felsökning: spela upp ljudet som skickas till transkribering
-                    try:
-                        print("[DEBUG] Spelar upp ljudfil som skickas till transkribering...")
-                        TEST_TONE = False  # Sätt till True för syntetisk ton, False för fil
-                        if not TEST_TONE:
-                            import wave
-                            import numpy as np
-                            wf = wave.open("test_audio_output_trimmed.wav", 'rb')
-                            samplerate = wf.getframerate()
-                            frames = wf.readframes(wf.getnframes())
-                            audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
-                            sd.play(audio, samplerate)
-                            sd.wait()
-                            wf.close()
-                        else:
-                            # ...syntetisk tonkod här om du vill växla tillbaka...
-                            pass
-                    except Exception as e:
-                        logger.warning(f"Playback-felsökning misslyckades: {e}")
-                        
             except queue.Empty:
                 pass  # No audio data in queue
             except Exception as e:
@@ -441,29 +425,32 @@ class ProcessingThread(threading.Thread):
         logger.info("Audio processing thread stopped.")
 
     def process_audio(self, audio_data: np.ndarray) -> str:
-        import time
+        """Bearbeta ljuddata och returnera transkribering."""
         start_time = time.time()
         logger.info(f"[TIMER] process_audio START {start_time:.3f}")
         try:
-            # Skip processing if audio is too quiet (redundant check, already done in run())
+            # Konvertera ljuddata till int16-format
+            audio_data = (audio_data * 32767).astype(np.int16)
+
+            # Hoppa över bearbetning om ljudet är för tyst
             if np.abs(audio_data).max() < self.silence_threshold:
-                logger.debug(f"Audio too quiet in process_audio, level: {np.abs(audio_data).max():.4f}")
+                logger.debug(f"Ljud för tyst i process_audio, nivå: {np.abs(audio_data).max():.4f}")
                 return ""
-            
-            # Use the StreamingProcessor's process_streaming method
-            logger.debug(f"Calling process_streaming with audio shape: {audio_data.shape}")
+
+            # Anropa StreamingProcessor för transkribering
+            logger.debug(f"Anropar process_streaming med ljudform: {audio_data.shape}")
             text = self.processor.process_streaming(audio_data)
+
+            # Log transcription result
+            logger.info(f"[TRANSCRIPTION] Result: {text}")
+
             end_time = time.time()
             elapsed = end_time - start_time
             logger.info(f"[TIMER] process_audio END {end_time:.3f} (elapsed: {elapsed:.3f}s)")
-            # Spara tiden för vidare loggning när text skickas till frontend
-            self._last_transcribe_time = start_time
-            self._last_transcribe_elapsed = elapsed
             return text
         except Exception as e:
-            logger.error(f"Error processing audio: {e}")
-            import traceback
-            logger.error(f"Process audio error trace: {traceback.format_exc()}")
+            logger.error(f"Fel vid bearbetning av ljud: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return ""
 
 # === WEBSOCKET HANDLER ===
@@ -486,6 +473,8 @@ def make_json_serializable(obj):
         return list(obj)
     if isinstance(obj, bytes):
         return obj.decode(errors='replace')
+    if isinstance(obj, object):
+        return str(obj)  # Konvertera okända objekt till strängar
     return str(obj)
 
 def convert_dict_keys_to_str(obj):
@@ -665,6 +654,77 @@ async def start_server(audio_processor=None, config=None):
         logger.error(f"Failed to start server: {e}")
         raise
 
+def configure_audio_device():
+    """Configure the audio device, falling back to a default if necessary."""
+    try:
+        device_id = int(os.getenv("AUDIO_DEVICE_ID", "2"))
+        sample_rate = int(os.getenv("SAMPLE_RATE", "16000"))
+
+        logger.info(f"Using audio device ID: {device_id}")
+        device_info = sd.query_devices(device_id)
+        logger.info(f"Audio device info: {device_info}")
+        return device_id
+    except Exception as e:
+        logger.warning(f"Failed to use specified audio device: {e}")
+        logger.info("Falling back to default audio device.")
+        default_device_id = sd.default.device[0]  # Get default input device ID
+        default_device_info = sd.query_devices(default_device_id)
+        logger.info(f"Default audio device info: {default_device_info}")
+        return default_device_id
+
+# Configure audio device before running the test
+default_device_id = configure_audio_device()
+os.environ["AUDIO_DEVICE_ID"] = str(default_device_id)
+
+def test_audio_input():
+    """Test audio input to ensure it is functional before starting the server."""
+    try:
+        device_id = int(os.getenv("AUDIO_DEVICE_ID", "2"))
+        sample_rate = int(os.getenv("SAMPLE_RATE", "16000"))
+        duration = 3  # Test duration in seconds
+
+        logger.info("Testing audio input...")
+        audio_data = sd.rec(int(duration * sample_rate), samplerate=sample_rate, channels=1, device=device_id, dtype='int16')
+        sd.wait()  # Wait for the recording to finish
+
+        if np.abs(audio_data).mean() < 0.01:
+            logger.error("Audio input test failed: Very low audio level detected.")
+            return False
+
+        logger.info("Audio input test passed.")
+        return True
+    except Exception as e:
+        logger.error(f"Audio input test failed: {e}")
+        return False
+
+# Run audio test before starting the server
+if not test_audio_input():
+    logger.error("Audio test failed. Server will not start.")
+    sys.exit(1)
+
+app = Flask(__name__)
+
+@app.route('/test-audio', methods=['GET'])
+def test_audio():
+    """Record 3 seconds of audio and return it as a WAV file."""
+    try:
+        fs = 16000  # Sample rate
+        duration = 3  # Duration in seconds
+        app.logger.info("Recording test audio...")
+        audio = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='int16')
+        sd.wait()
+
+        # Save audio to a BytesIO stream
+        wav_buffer = io.BytesIO()
+        wav.write(wav_buffer, fs, audio)
+        wav_buffer.seek(0)
+
+        app.logger.info("Test audio recorded successfully.")
+        return send_file(wav_buffer, mimetype='audio/wav', as_attachment=False, download_name='test_audio.wav')
+    except Exception as e:
+        app.logger.error(f"Failed to record test audio: {e}")
+        return "Error recording audio", 500
+
 if __name__ == "__main__":
     try:
         # Försök använda porten i config, annars hitta en ledig port
@@ -684,3 +744,4 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Failed to start server: {e}")
         print(f"Failed to start server: {e}")
+    app.run(port=5000)  # Start the Flask app on port 5000

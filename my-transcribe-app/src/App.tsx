@@ -12,16 +12,22 @@ function App() {
   const [blockAnalysis, setBlockAnalysis] = useState<any>(null);
   const [contextAnalysis, setContextAnalysis] = useState<any>(null);
 
-  // Hämta port från websocket_port.txt vid start
+  // Lägg till loggning för att spåra port och WebSocket-status
   useEffect(() => {
+    console.log("Hämtar WebSocket-port...");
     fetch("/websocket_port.txt")
       .then(res => res.text())
       .then(portStr => {
+        console.log("Port hämtad:", portStr);
         const port = parseInt(portStr.trim(), 10);
-        if (!isNaN(port)) setWsPort(port);
-        else setLog(l => [...l, "Kunde inte läsa WebSocket-port från websocket_port.txt"]);
+        if (!isNaN(port)) {
+          setWsPort(port);
+          console.log("WebSocket-port inställd på:", port);
+        } else {
+          console.error("Ogiltig port:", portStr);
+        }
       })
-      .catch(() => setLog(l => [...l, "Kunde inte läsa websocket_port.txt"]));
+      .catch(err => console.error("Fel vid hämtning av WebSocket-port:", err));
   }, []);
 
   // Initiera WebSocket när porten är känd
@@ -103,6 +109,21 @@ function App() {
     }
   };
 
+  const testAudio = async () => {
+    try {
+      const response = await fetch("/test-audio");
+      if (!response.ok) {
+        throw new Error("Failed to fetch test audio");
+      }
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      audio.play();
+    } catch (error) {
+      console.error("Error testing audio:", error);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', maxWidth: 1100, margin: "2rem auto", fontFamily: "sans-serif", position: 'relative' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -113,6 +134,7 @@ function App() {
           <button onClick={() => sendCommand("start_transcription")} style={{ marginLeft: 8 }}>Starta transkribering</button>
           <button onClick={() => sendCommand("stop_transcription")} style={{ marginLeft: 8 }}>Stoppa transkribering</button>
           <button onClick={sendPing} style={{ marginLeft: 8 }}>Ping backend</button>
+          <button onClick={testAudio} style={{ marginLeft: 8 }}>Test Audio</button>
         </div>
         <div style={{ marginBottom: 16 }}>
           <b>Status:</b> {status}

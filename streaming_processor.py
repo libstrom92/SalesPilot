@@ -44,7 +44,7 @@ class StreamingProcessor:
         
         self.buffer_size = 16384  # Increased buffer size for better handling of audio chunks
         self.min_audio_length = 0.25  # Reduced from 0.5 to 0.25 seconds
-        self.silence_threshold = 0.005  # Sänkt från 0.01 till 0.005 för att vara mer känslig
+        self.silence_threshold = 0.002  # Lowered from 0.005 to ensure valid audio is not skipped
         self.max_queue_size = 10  # Limit the processing queue size to prevent overflows
 
         # Debug: Log initialization details
@@ -123,10 +123,12 @@ class StreamingProcessor:
         """Process the current audio buffer"""
         with self.buffer_lock:
             if not self.audio_buffer:
+                self.logger.debug("Audio buffer is empty, skipping processing.")
                 return
                 
             # Concatenate buffer chunks
             audio_data = np.concatenate(self.audio_buffer)
+            self.logger.debug(f"Buffer size before processing: {len(audio_data)} samples")
             
             # Clear buffer
             self.audio_buffer = []
